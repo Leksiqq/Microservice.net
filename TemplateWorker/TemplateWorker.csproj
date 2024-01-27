@@ -3,7 +3,7 @@
   <PropertyGroup>
     <LangVersion>12</LangVersion>
     <OutputType>Library</OutputType>
-    <TargetFrameworks>net8.0;net6.0</TargetFrameworks>
+    <TargetFrameworks>net8.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>Net.Leksi.MicroService.TemplateWorker</AssemblyName>
