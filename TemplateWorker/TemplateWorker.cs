@@ -151,11 +151,11 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
                         Config.InoperativeDurationError = DefaultConfig.InoperativeDurationError;
                     }
 
-                    FillMissedOptions(DefaultConfig, Config);
+                    BeforeInitializing();
 
                     if (_logger is { } && _logger.IsEnabled(LogLevel.Information))
                     {
-                        _logger.LogInformation(JsonSerializer.Serialize(Config));
+                        _logger.LogInformation("{config}", JsonSerializer.Serialize(Config));
                     }
                     await Initialize(stoppingToken);
                     LastOperativeTime = DateTime.UtcNow;
@@ -202,8 +202,11 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
                 }
 
             }
-            int msLeft = Config!.PollPeriod - (int)(DateTime.UtcNow - start).TotalMilliseconds;
-            await Task.Delay(msLeft >= s_minDelay ? msLeft : s_minDelay, stoppingToken);
+            if (_running)
+            {
+                int msLeft = Config!.PollPeriod - (int)(DateTime.UtcNow - start).TotalMilliseconds;
+                await Task.Delay(msLeft >= s_minDelay ? msLeft : s_minDelay, stoppingToken);
+            }
         }
         await _services.GetRequiredService<IHost>().StopAsync(stoppingToken);
     }
@@ -213,5 +216,5 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
     protected abstract void ProcessInoperativeWarning(TimeSpan inoperativeTime, Exception? lastInoperativeException);
     protected abstract Task MakeOperative(CancellationToken stoppingToken);
     protected abstract Task Initialize(CancellationToken stoppingToken);
-    protected abstract void FillMissedOptions(TConfig defaultConfig, TConfig config);
+    protected abstract void BeforeInitializing();
 }
