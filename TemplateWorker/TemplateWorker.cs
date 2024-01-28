@@ -61,10 +61,16 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
     protected Exception? LastInoperativeException { get; private set; }
     protected ZooKeeper? ZooKeeper { get; private init; }
     protected CancellationToken StoppingTokenCache { get; private set; } = CancellationToken.None;
+    protected string? VarRoot {get; private set; }
+    protected ZkJsonSerializer? VarSerializer {get; private set;}
+    protected JsonSerializerOptions? VarSerializerOptions { get; private set; }
+
 
 
     public TemplateWorker(IServiceProvider services)
     {
+        Console.CancelKeyPress += Console_CancelKeyPress;
+
         _services = services;
         _logger = (ILogger<TemplateWorker<TConfig>>?)_services.GetService(typeof(ILogger<>).MakeGenericType([ GetType() ]));
         Config = DefaultConfig;
@@ -151,7 +157,20 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
                         Config.InoperativeDurationError = DefaultConfig.InoperativeDurationError;
                     }
 
+                    if (Config.VarPath is { })
+                    {
+                        VarRoot = $"{Config.VarPath}/{Name}";
+                        VarSerializerOptions = new();
+                        VarSerializer = new ZkJsonSerializer()
+                        {
+                            ZooKeeper = ZooKeeper!,
+                            Root = $"{VarRoot}",
+                        };
+                        VarSerializerOptions.Converters.Add(VarSerializer);
+                    }
+
                     BeforeInitializing();
+
 
                     if (_logger is { } && _logger.IsEnabled(LogLevel.Information))
                     {
@@ -208,13 +227,20 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
                 await Task.Delay(msLeft >= s_minDelay ? msLeft : s_minDelay, stoppingToken);
             }
         }
+        await Exiting(stoppingToken);
         await _services.GetRequiredService<IHost>().StopAsync(stoppingToken);
     }
 
+    protected abstract Task Exiting(CancellationToken stoppingToken);
     protected abstract Task Operate(CancellationToken stoppingToken);
     protected abstract void ProcessInoperativeError(TimeSpan inoperativeTime, Exception? lastInoperativeException);
     protected abstract void ProcessInoperativeWarning(TimeSpan inoperativeTime, Exception? lastInoperativeException);
     protected abstract Task MakeOperative(CancellationToken stoppingToken);
     protected abstract Task Initialize(CancellationToken stoppingToken);
     protected abstract void BeforeInitializing();
+    private void Console_CancelKeyPress(object? sender, ConsoleCancelEventArgs e)
+    {
+        StopAsync(StoppingTokenCache).Wait();
+    }
+
 }
