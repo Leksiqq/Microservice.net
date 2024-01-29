@@ -18,11 +18,11 @@
   <PropertyGroup Condition="'$(Configuration)'=='Release'">
     <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
     <IsPackable>true</IsPackable>
-    <Version>1.0.0</Version>
+    <Version>1.0.2</Version>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(Configuration)'=='Release'">
-    <PackageReference Include="Net.Leksi.ZkJson" Version="1.0.*" />
+    <PackageReference Include="Net.Leksi.ZkJson" Version="1.2.*" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(Configuration)'=='Debug'">

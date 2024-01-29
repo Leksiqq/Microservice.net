@@ -30,11 +30,13 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
     private const string s_zkConnTimeoutMessage = "--zkConnTimeout: {to}";
     private const string s_zkConnectedMessage = "ZooKeeper connected";
     private const string s_zkErrorMessage = "Zookeeper error: {ex}";
+    private const string s_singletonWithotVarPathMessage = $"The running worker is marked as 'Singleton', but 'VarPath' is not set!";
+
+    private const string s_singletonVarPath = "$singleton";
 
     private const int s_minDelay = 100;
     private const int s_defaultZkConnTimeout = 10000;
 
-    private readonly IServiceProvider _services;
     private readonly string _zkAddr;
     private readonly string _zkConfigPath;
     private readonly int _zkConnTimeout;
@@ -45,6 +47,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
     private bool _running = true;
     private bool _isConfigured = false;
 
+    protected readonly IServiceProvider _services;
     protected string Name { get; private init; }
     protected TConfig Config { get; private set; }
 
@@ -55,6 +58,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
         InoperativeDurationWarning = new TimeSpan(0, 0, 20),
         InoperativeDurationError = new TimeSpan(0, 0, 30),
     };
+    protected bool IsSingleton { get; init; } = false;
 
     protected abstract bool IsOperative { get; }
     protected DateTime LastOperativeTime { get; private set; } = DateTime.MinValue;
@@ -133,12 +137,12 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
                 }
                 try
                 {
-                    ZkJsonSerializer zkJson = new()
+                    ZkJsonSerializer configSerializer = new()
                     {
                         ZooKeeper = ZooKeeper,
                         Root = $"{_zkConfigPath}/{Name}",
                     };
-                    configSerializationOption.Converters.Add(zkJson);
+                    configSerializationOption.Converters.Add(configSerializer);
                     Config = JsonSerializer.Deserialize<TConfig>(
                         JsonSerializer.SerializeToElement(ZkStub.Instance, configSerializationOption),
                         configDeserializationOption
@@ -157,6 +161,11 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
                         Config.InoperativeDurationError = DefaultConfig.InoperativeDurationError;
                     }
 
+                    if (IsSingleton && Config.VarPath is null)
+                    {
+                        throw new InvalidOperationException(s_singletonWithotVarPathMessage);
+                    }
+
                     if (Config.VarPath is { })
                     {
                         VarRoot = $"{Config.VarPath}/{Name}";
@@ -164,12 +173,17 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
                         VarSerializer = new ZkJsonSerializer()
                         {
                             ZooKeeper = ZooKeeper!,
-                            Root = $"{VarRoot}",
+                            Root = Config.VarPath,
                         };
+                        if (!await VarSerializer.RootExists())
+                        {
+                            await VarSerializer.CreateRoot();
+                        }
+                        VarSerializer.Root = VarRoot;
                         VarSerializerOptions.Converters.Add(VarSerializer);
                     }
 
-                    BeforeInitializing();
+                    await BeforeInitializing(stoppingToken);
 
 
                     if (_logger is { } && _logger.IsEnabled(LogLevel.Information))
@@ -207,17 +221,27 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
                     TimeSpan inoperativeTime = DateTime.UtcNow - LastOperativeTime;
                     if (inoperativeTime >= Config!.InoperativeDurationWarning)
                     {
-                        ProcessInoperativeWarning(inoperativeTime, LastInoperativeException);
+                        await ProcessInoperativeWarning(inoperativeTime, LastInoperativeException, stoppingToken);
                         if (inoperativeTime >= Config!.InoperativeDurationError)
                         {
-                            ProcessInoperativeError(inoperativeTime, LastInoperativeException);
+                            await ProcessInoperativeError(inoperativeTime, LastInoperativeException, stoppingToken);
                         }
                     }
                 }
                 else
                 {
-                    await Operate(stoppingToken);
-                    LastOperativeTime = DateTime.UtcNow;
+                    try
+                    {
+                        if (await CanOperate(stoppingToken))
+                        {
+                            await Operate(stoppingToken);
+                        }
+                        LastOperativeTime = DateTime.UtcNow;
+                    }
+                    catch (Exception ex)
+                    {
+                        LastInoperativeException = ex;
+                    }
                 }
 
             }
@@ -230,17 +254,27 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
         await Exiting(stoppingToken);
         await _services.GetRequiredService<IHost>().StopAsync(stoppingToken);
     }
-
     protected abstract Task Exiting(CancellationToken stoppingToken);
     protected abstract Task Operate(CancellationToken stoppingToken);
-    protected abstract void ProcessInoperativeError(TimeSpan inoperativeTime, Exception? lastInoperativeException);
-    protected abstract void ProcessInoperativeWarning(TimeSpan inoperativeTime, Exception? lastInoperativeException);
+    protected abstract Task ProcessInoperativeError(TimeSpan inoperativeTime, Exception? lastInoperativeException, CancellationToken stoppingToken);
+    protected abstract Task ProcessInoperativeWarning(TimeSpan inoperativeTime, Exception? lastInoperativeException, CancellationToken stoppingToken);
     protected abstract Task MakeOperative(CancellationToken stoppingToken);
     protected abstract Task Initialize(CancellationToken stoppingToken);
-    protected abstract void BeforeInitializing();
+    protected abstract Task BeforeInitializing(CancellationToken stoppingToken);
     private void Console_CancelKeyPress(object? sender, ConsoleCancelEventArgs e)
     {
         StopAsync(StoppingTokenCache).Wait();
     }
+    private async Task<bool> CanOperate(CancellationToken stoppingToken)
+    {
+        if (IsSingleton)
+        {
+            VarSerializer!.Reset($"{VarRoot}/{s_singletonVarPath}");
+            if (! await VarSerializer.RootExists())
+            {
 
+            }
+        }
+        return true;
+    }
 }
