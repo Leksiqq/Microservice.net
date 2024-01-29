@@ -1,6 +1,7 @@
 ﻿using Net.Leksi.MicroService.Common;
 using Net.Leksi.ZkJson;
 using org.apache.zookeeper;
+using System.Text;
 using System.Text.Json;
 
 namespace Net.Leksi.MicroService;
@@ -30,9 +31,10 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
     private const string s_zkConnTimeoutMessage = "--zkConnTimeout: {to}";
     private const string s_zkConnectedMessage = "ZooKeeper connected";
     private const string s_zkErrorMessage = "Zookeeper error: {ex}";
-    private const string s_singletonWithotVarPathMessage = $"The running worker is marked as 'Singleton', but 'VarPath' is not set!";
+    private const string s_missedZkVarPathMessage = "'VarPath' is a mandatory Config property!";
+    private const string s_stateFormat = "{{\"state\": \"{0}\", \"time\": \"{1:o}\"}}";
 
-    private const string s_singletonVarPath = "$singleton";
+    private const string s_stateVarPath = "$state";
 
     private const int s_minDelay = 100;
     private const int s_defaultZkConnTimeout = 10000;
@@ -46,6 +48,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
 
     private bool _running = true;
     private bool _isConfigured = false;
+    private bool _isLeader = false;
 
     protected readonly IServiceProvider _services;
     protected string Name { get; private init; }
@@ -66,8 +69,10 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
     protected ZooKeeper? ZooKeeper { get; private init; }
     protected CancellationToken StoppingTokenCache { get; private set; } = CancellationToken.None;
     protected string? VarRoot {get; private set; }
-    protected ZkJsonSerializer? VarSerializer {get; private set;}
-    protected JsonSerializerOptions? VarSerializerOptions { get; private set; }
+    protected ZkJsonSerializer VarSerializer { get; private set; } = null!;
+    protected JsonSerializerOptions VarSerializerOptions { get; private set; } = null!;
+    protected State State { get; private set; } = State.Idle;
+    protected string WorkerId { get; private set; } = null!;
 
 
 
@@ -80,6 +85,15 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
         Config = DefaultConfig;
 
         IConfiguration conf = _services.GetRequiredService<IConfiguration>();
+
+        if (bool.TryParse(conf["RUNNING_IN_CONTAINER"], out bool ric) && ric && conf["HOSTNAME"] is { })
+        {
+            WorkerId = conf["HOSTNAME"]!;
+        }
+        else
+        {
+            WorkerId = Guid.NewGuid().ToString();
+        }
 
         Name = conf["name"] ?? string.Empty;
         _zkAddr = conf["zkAddr"] ?? string.Empty;
@@ -117,7 +131,6 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
         }
         ZooKeeper = new ZooKeeper(_zkAddr, _zkConnTimeout, new ZkWatchwer(this));
     }
-
     protected async sealed override Task ExecuteAsync(CancellationToken stoppingToken)
     {
         StoppingTokenCache = stoppingToken;
@@ -126,7 +139,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
         {
             _running = false;
         }
-        while (_running && !stoppingToken.IsCancellationRequested)
+        while (_running && !stoppingToken.IsCancellationRequested && State is not State.Fail)
         {
             DateTime start = DateTime.UtcNow;
             if (!_isConfigured && ZooKeeper is { } && ZooKeeper.getState() is ZooKeeper.States.CONNECTED)
@@ -161,26 +174,45 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
                         Config.InoperativeDurationError = DefaultConfig.InoperativeDurationError;
                     }
 
-                    if (IsSingleton && Config.VarPath is null)
+                    if (string.IsNullOrEmpty(Config.VarPath))
                     {
-                        throw new InvalidOperationException(s_singletonWithotVarPathMessage);
+                        throw new InvalidOperationException(s_missedZkVarPathMessage);
                     }
 
-                    if (Config.VarPath is { })
+                    VarRoot = $"{Config.VarPath}/{Name}";
+                    VarSerializerOptions = new();
+                    VarSerializer = new ZkJsonSerializer()
                     {
-                        VarRoot = $"{Config.VarPath}/{Name}";
-                        VarSerializerOptions = new();
-                        VarSerializer = new ZkJsonSerializer()
-                        {
-                            ZooKeeper = ZooKeeper!,
-                            Root = Config.VarPath,
-                        };
-                        if (!await VarSerializer.RootExists())
-                        {
-                            await VarSerializer.CreateRoot();
-                        }
-                        VarSerializer.Root = VarRoot;
-                        VarSerializerOptions.Converters.Add(VarSerializer);
+                        ZooKeeper = ZooKeeper!,
+                        Root = Config.VarPath,
+                    };
+                    VarSerializerOptions.Converters.Add(VarSerializer);
+
+                    if (!await VarSerializer.RootExists())
+                    {
+                        await VarSerializer.CreateRoot();
+                    }
+                    VarSerializer.Reset(VarRoot);
+                    if (!await VarSerializer.RootExists())
+                    {
+                        string json = "{}";
+                        JsonSerializer.Deserialize<ZkStub>(
+                            new MemoryStream(
+                                Encoding.ASCII.GetBytes(json)
+                            ),
+                            VarSerializerOptions
+                        );
+                    }
+                    VarSerializer.Reset($"{VarRoot}/{s_stateVarPath}");
+                    if (!await VarSerializer.RootExists())
+                    {
+                        string json = "{}";
+                        JsonSerializer.Deserialize<ZkStub>(
+                            new MemoryStream(
+                                Encoding.ASCII.GetBytes(json)
+                            ),
+                            VarSerializerOptions
+                        );
                     }
 
                     await BeforeInitializing(stoppingToken);
@@ -193,87 +225,157 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
                     await Initialize(stoppingToken);
                     LastOperativeTime = DateTime.UtcNow;
                     _isConfigured = true;
+                    PublishState();
                 }
                 catch (Exception ex)
                 {
                     if (_logger is { } && _logger.IsEnabled(LogLevel.Critical))
                     {
-                        _logger.LogCritical(s_zkErrorMessage, ex.Message);
+                        _logger.LogCritical(s_zkErrorMessage, ex);
                     }
                     _running = false;
                 }
             }
-            if (_isConfigured)
-            {
-                if (!IsOperative)
-                {
-                    try
-                    {
-                        await MakeOperative(stoppingToken);
-                    }
-                    catch (Exception ex)
-                    {
-                        LastInoperativeException = ex;
-                    }
-                }
-                if (!IsOperative)
-                {
-                    TimeSpan inoperativeTime = DateTime.UtcNow - LastOperativeTime;
-                    if (inoperativeTime >= Config!.InoperativeDurationWarning)
-                    {
-                        await ProcessInoperativeWarning(inoperativeTime, LastInoperativeException, stoppingToken);
-                        if (inoperativeTime >= Config!.InoperativeDurationError)
-                        {
-                            await ProcessInoperativeError(inoperativeTime, LastInoperativeException, stoppingToken);
-                        }
-                    }
-                }
-                else
-                {
-                    try
-                    {
-                        if (await CanOperate(stoppingToken))
-                        {
-                            await Operate(stoppingToken);
-                        }
-                        LastOperativeTime = DateTime.UtcNow;
-                    }
-                    catch (Exception ex)
-                    {
-                        LastInoperativeException = ex;
-                    }
-                }
-
-            }
             if (_running)
             {
+                if (_isConfigured)
+                {
+                    if (!IsOperative)
+                    {
+                        try
+                        {
+                            await MakeOperative(stoppingToken);
+                        }
+                        catch (Exception ex)
+                        {
+                            State = State.Fail;
+                            LastInoperativeException = ex;
+                            await ProcessFail(LastInoperativeException, stoppingToken);
+                        }
+                    }
+                    if (!IsOperative)
+                    {
+                        TimeSpan inoperativeTime = DateTime.UtcNow - LastOperativeTime;
+                        if (State is not State.Fail)
+                        {
+                            if (inoperativeTime >= Config!.InoperativeDurationWarning)
+                            {
+                                State = State.Warning;
+                                await ProcessInoperativeWarning(inoperativeTime, LastInoperativeException, stoppingToken);
+                                if (inoperativeTime >= Config!.InoperativeDurationError)
+                                {
+                                    State = State.Error;
+                                    await ProcessInoperativeError(inoperativeTime, LastInoperativeException, stoppingToken);
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        try
+                        {
+                            LastOperativeTime = DateTime.UtcNow;
+                            if (CanOperate())
+                            {
+                                State = State.Operate;
+                                UpdateState();
+                                await Operate(stoppingToken);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            State = State.Fail;
+                            LastInoperativeException = ex;
+                            UpdateState();
+                            await ProcessFail(LastInoperativeException, stoppingToken);
+                        }
+                    }
+
+                }
                 int msLeft = Config!.PollPeriod - (int)(DateTime.UtcNow - start).TotalMilliseconds;
-                await Task.Delay(msLeft >= s_minDelay ? msLeft : s_minDelay, stoppingToken);
+                try
+                {
+                    await Task.Delay(msLeft >= s_minDelay ? msLeft : s_minDelay, stoppingToken);
+                }
+                catch (TaskCanceledException) { }
             }
         }
-        await Exiting(stoppingToken);
+        await DeleteState();
         await _services.GetRequiredService<IHost>().StopAsync(stoppingToken);
     }
-    protected abstract Task Exiting(CancellationToken stoppingToken);
     protected abstract Task Operate(CancellationToken stoppingToken);
+    protected abstract Task ProcessFail(Exception? lastInoperativeException, CancellationToken stoppingToken);
     protected abstract Task ProcessInoperativeError(TimeSpan inoperativeTime, Exception? lastInoperativeException, CancellationToken stoppingToken);
     protected abstract Task ProcessInoperativeWarning(TimeSpan inoperativeTime, Exception? lastInoperativeException, CancellationToken stoppingToken);
     protected abstract Task MakeOperative(CancellationToken stoppingToken);
     protected abstract Task Initialize(CancellationToken stoppingToken);
     protected abstract Task BeforeInitializing(CancellationToken stoppingToken);
+    protected void PublishState()
+    {
+        VarSerializer.Reset($"{VarRoot}/{s_stateVarPath}/{WorkerId}");
+        JsonSerializer.Deserialize<ZkStub>(
+            new MemoryStream(
+                Encoding.ASCII.GetBytes(string.Format(s_stateFormat, State, LastOperativeTime))
+            ),
+            VarSerializerOptions
+        );
+    }
+    protected void UpdateState()
+    {
+        DateTime time = (State is State.Idle || State is State.Operate) ? DateTime.UtcNow : LastOperativeTime;
+        VarSerializer.Reset($"{VarRoot}/{s_stateVarPath}/{WorkerId}");
+        ZkAction saveAction = VarSerializer.Action;
+        if(!IsSingleton)
+        {
+            VarSerializer.Action = ZkAction.Update;
+        }
+        JsonSerializer.Deserialize<ZkStub>(
+            new MemoryStream(
+                Encoding.ASCII.GetBytes(string.Format(s_stateFormat, State, time))
+            ),
+            VarSerializerOptions
+        );
+        VarSerializer.Action = saveAction;
+    }
+    private async Task DeleteState()
+    {
+        VarSerializer.Reset($"{VarRoot}/{s_stateVarPath}/{WorkerId}");
+        await VarSerializer.DeleteAsync();
+    }
     private void Console_CancelKeyPress(object? sender, ConsoleCancelEventArgs e)
     {
         StopAsync(StoppingTokenCache).Wait();
     }
-    private async Task<bool> CanOperate(CancellationToken stoppingToken)
+    private bool CanOperate()
     {
         if (IsSingleton)
         {
-            VarSerializer!.Reset($"{VarRoot}/{s_singletonVarPath}");
-            if (! await VarSerializer.RootExists())
+            VarSerializer.Reset($"{VarRoot}/{s_stateVarPath}");
+            JsonElement states = JsonSerializer.SerializeToElement(ZkStub.Instance, VarSerializerOptions);
+            foreach (JsonProperty prop in states.EnumerateObject())
             {
-
+                if(prop.Name != WorkerId)
+                {
+                    if(
+                        prop.Value.EnumerateObject().Where(e => e.Name == "time").FirstOrDefault().Value is JsonElement je 
+                        && je.ValueKind is JsonValueKind.String
+                        && je.GetString() is string ts
+                        && DateTime.TryParse(ts, out DateTime time)
+                        && DateTime.UtcNow - time < Config.InoperativeDurationWarning
+                    )
+                    {
+                        return false;
+                    }
+                }
             }
+            if (!_isLeader)
+            {
+                if (_logger is { } && _logger.IsEnabled(LogLevel.Information))
+                {
+                    _logger.LogInformation($"{WorkerId} becomes a leader!");
+                }
+            }
+            _isLeader = true;
         }
         return true;
     }
