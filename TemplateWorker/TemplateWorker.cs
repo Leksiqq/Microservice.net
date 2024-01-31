@@ -156,10 +156,13 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
                         Root = $"{_zkConfigPath}/{Name}",
                     };
                     configSerializationOption.Converters.Add(configSerializer);
+
                     Config = JsonSerializer.Deserialize<TConfig>(
-                        JsonSerializer.SerializeToElement(ZkStub.Instance, configSerializationOption),
+                        configSerializer.IncrementalSerialize("base"),
                         configDeserializationOption
                     )!;
+
+                    JsonSerializer.Serialize(Console.OpenStandardOutput(), Config);
 
                     if (Config.PollPeriod == default)
                     {
@@ -303,6 +306,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
         await DeleteState();
         await _services.GetRequiredService<IHost>().StopAsync(stoppingToken);
     }
+    protected abstract Task Exiting(CancellationToken stoppingToken);
     protected abstract Task Operate(CancellationToken stoppingToken);
     protected abstract Task ProcessFail(Exception? lastInoperativeException, CancellationToken stoppingToken);
     protected abstract Task ProcessInoperativeError(TimeSpan inoperativeTime, Exception? lastInoperativeException, CancellationToken stoppingToken);

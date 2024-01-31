@@ -5,11 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>Net.Leksi.MicroService</RootNamespace>
-    <AssemblyName>Net.Leksi.MicroService.Data</AssemblyName>
+    <AssemblyName>Net.Leksi.MicroService.Config</AssemblyName>
   </PropertyGroup>
-
-  <ItemGroup>
-    <PackageReference Include="MimeKit" Version="4.3.0" />
-  </ItemGroup>
 
 </Project>
