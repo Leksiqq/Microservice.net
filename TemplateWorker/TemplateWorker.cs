@@ -158,7 +158,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
                     configSerializationOption.Converters.Add(configSerializer);
 
                     Config = JsonSerializer.Deserialize<TConfig>(
-                        configSerializer.IncrementalSerialize("base"),
+                        configSerializer.IncrementalSerialize("$base"),
                         configDeserializationOption
                     )!;
 
