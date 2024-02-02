@@ -5,7 +5,7 @@ using System.Text;
 using System.Text.Json;
 
 namespace Net.Leksi.MicroService;
-public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig : TemplateConfig, new()
+public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig : TemplateWorkerConfig, new()
 {
     private class ZkWatchwer(TemplateWorker<TConfig> worker) : Watcher
     {
@@ -51,7 +51,6 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
     private bool _isLeader = false;
 
     protected readonly IServiceProvider _services;
-    protected string Name { get; private init; }
     protected TConfig Config { get; private set; }
 
     protected readonly ILogger<TemplateWorker<TConfig>>? _logger;
@@ -73,9 +72,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
     protected JsonSerializerOptions VarSerializerOptions { get; private set; } = null!;
     protected State State { get; private set; } = State.Idle;
     protected string WorkerId { get; private set; } = null!;
-
-
-
+    public string Name { get; private init; }
     public TemplateWorker(IServiceProvider services)
     {
         Console.CancelKeyPress += Console_CancelKeyPress;

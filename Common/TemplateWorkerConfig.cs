@@ -1,6 +1,6 @@
 ﻿namespace Net.Leksi.MicroService.Common;
 
-public class TemplateConfig
+public class TemplateWorkerConfig
 {
     public int PollPeriod {  get; set; }
     public string? VarPath { get; set; }
