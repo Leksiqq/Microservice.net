@@ -1,7 +1,7 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Net.Leksi.MicroService;
+namespace Net.Leksi.MicroService.Common;
 
 public class KafkaConfigJsonConverter : JsonConverter<KafkaConfig>
 {

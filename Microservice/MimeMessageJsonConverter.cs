@@ -2,7 +2,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Net.Leksi.MicroService;
+namespace Net.Leksi.MicroService.Common;
 
 public class MimeMessageJsonConverter : JsonConverter<MimeMessage>
 {
@@ -14,17 +14,8 @@ public class MimeMessageJsonConverter : JsonConverter<MimeMessage>
     public override void Write(Utf8JsonWriter writer, MimeMessage value, JsonSerializerOptions options)
     {
         writer.WriteStartObject();
-        if(value.Headers.Count > 0)
-        {
-            writer.WritePropertyName("headers");
-            writer.WriteStartObject();
-            foreach (Header h in value.Headers)
-            {
-                writer.WritePropertyName(h.Field);
-                JsonSerializer.Serialize(writer, h.Value, options);
-            }
-            writer.WriteEndObject();
-        }
+
+        WriteHeaders(writer, value.Headers, options);
 
         MimeIterator iter = new(value);
 
@@ -36,32 +27,45 @@ public class MimeMessageJsonConverter : JsonConverter<MimeMessage>
             {
                 partsStarted = true;
                 writer.WritePropertyName("parts");
-                writer.WriteStartObject();
+                writer.WriteStartArray();
             }
             if (iter.Current is MimePart part)
             {
-                if(part.Headers.Count > 0)
-                {
-                    writer.WritePropertyName("headers");
-                    writer.WriteStartObject();
-                    foreach (Header h in part.Headers)
-                    {
-                        writer.WritePropertyName(h.Field);
-                        JsonSerializer.Serialize(writer, h.Value, options);
-                    }
-                    writer.WriteEndObject();
-                }
+                writer.WriteStartObject();
+
+                WriteHeaders(writer, part.Headers, options);
+
                 MemoryStream ms = new();
                 part.Content.WriteTo(ms);
                 ms.Flush();
                 ms.Position = 0;
-                writer.WriteBase64String("content", ms.ToArray());
+                writer.WriteString("content", ms.ToArray());
+
+                writer.WriteEndObject();
             }
         }
         if(partsStarted)
         {
-            writer.WriteEndObject();
+            writer.WriteEndArray();
         }
         writer.WriteEndObject();
+    }
+
+    private static void WriteHeaders(Utf8JsonWriter writer, HeaderList headers, JsonSerializerOptions options)
+    {
+        if (headers.Count > 0)
+        {
+            writer.WritePropertyName("headers");
+            writer.WriteStartArray();
+            foreach (Header h in headers)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("name", h.Field);
+                writer.WritePropertyName("value");
+                JsonSerializer.Serialize(writer, h.Value, options);
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+        }
     }
 }

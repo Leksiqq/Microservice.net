@@ -1,6 +1,6 @@
 ﻿using System.Text.Json.Serialization;
 
-namespace Net.Leksi.MicroService;
+namespace Net.Leksi.MicroService.Common;
 
 [JsonConverter(typeof(KafkaConfigJsonConverter))]
 public class KafkaConfig
