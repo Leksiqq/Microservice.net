@@ -7,7 +7,15 @@ public class KafkaConfigJsonConverter : JsonConverter<KafkaConfig>
 {
     public override KafkaConfig? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        KafkaConfig result = new();
+        KafkaConfig result;
+        if(typeToConvert == typeof(KafkaLoggerConfig))
+        {
+            result = new KafkaLoggerConfig();
+        }
+        else
+        {
+            result = new KafkaConfig();
+        }
         if (reader.TokenType is JsonTokenType.StartObject)
         {
             while (reader.Read() && reader.TokenType is not JsonTokenType.EndObject)
