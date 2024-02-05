@@ -4,6 +4,11 @@ namespace Net.Leksi.MicroService.Common;
 
 public class KafkaLogger : ILogger, IDisposable
 {
+    private readonly KafkaLoggerProvider _provider;
+    public KafkaLogger(KafkaLoggerProvider provider)
+    {
+        _provider = provider;
+    }
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull
     {
         return this;

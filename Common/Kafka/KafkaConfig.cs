@@ -1,10 +1,5 @@
-﻿using System.Text.Json.Serialization;
-
-namespace Net.Leksi.MicroService.Common;
-
-[JsonConverter(typeof(KafkaConfigJsonConverter))]
-public class KafkaConfig
+﻿namespace Net.Leksi.MicroService.Common;
+public class KafkaConfig: KafkaConfigBase
 {
-    public Dictionary<string, string> Properties { get; private init; } = [];
     public List<string> Topics { get; private init; } = [];
 }

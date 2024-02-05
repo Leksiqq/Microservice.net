@@ -2,8 +2,7 @@
 
 namespace Net.Leksi.MicroService.Common;
 
-[JsonConverter(typeof(KafkaConfigJsonConverter))]
-public class KafkaLoggerConfig: KafkaConfig
+public class KafkaLoggerConfig: KafkaConfigBase
 {
     public List<string> InformationTopics { get; private init; } = [];
     public List<string> WarningTopics { get; private init; } = [];
