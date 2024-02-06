@@ -1,6 +1,6 @@
 ﻿namespace Net.Leksi.MicroService.Common;
 
-public class ImapReaderKafkaMessage: KafkaMessage
+public class ReceivedFileKafkaMessage : KafkaMessage
 {
     public string Path { get; set; } = null!;
 }

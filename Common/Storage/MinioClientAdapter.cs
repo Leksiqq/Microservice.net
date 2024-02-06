@@ -7,16 +7,16 @@ namespace Net.Leksi.MicroService.Common;
 
 public class MinioClientAdapter : ICloudClient
 {
-    private const string s_slash = "/";
-#pragma warning disable SYSLIB1045 // Преобразовать в "GeneratedRegexAttribute".
-    private static readonly Regex manySlashes = new("/{2,}");
-#pragma warning restore SYSLIB1045 // Преобразовать в "GeneratedRegexAttribute".
     private readonly IMinioClient _minio = null!;
     private readonly MinioConfig _config;
+    private readonly string _folder;
+    public string Bucket => _config.Bucket;
+    public string Folder => _folder;
     public MinioClientAdapter(MinioConfig config)
     {
         _config = config;
-        var builder = new MinioClient()
+        _folder = Util.CollapseSlashes($"/{_config.Folder ?? string.Empty}");
+        IMinioClient builder = new MinioClient()
             .WithEndpoint(_config.Endpoint)
             .WithCredentials(_config.AccessKey, _config.SecretKey);
         _minio = builder.Build();
@@ -53,7 +53,7 @@ public class MinioClientAdapter : ICloudClient
     }
     private string GetAbsolutePath(string path)
     {
-        return manySlashes.Replace($"{s_slash}{_config.Folder ?? string.Empty}{s_slash}{path}", s_slash);
+        return Util.CollapseSlashes($"/{_config.Folder ?? string.Empty}/{path}");
     }
     private async Task EnsureBucketExists(CancellationToken stoppingToken)
     {

@@ -1,9 +1,7 @@
-﻿using System.Text.Json.Serialization;
+﻿namespace Net.Leksi.MicroService.Common;
 
-namespace Net.Leksi.MicroService.Common;
-
-[JsonConverter(typeof(KafkaConfigJsonConverter))]
 public abstract class KafkaConfigBase
 {
     public Dictionary<string, string> Properties { get; private init; } = [];
+    public string Sender { get; set; } = string.Empty;
 }

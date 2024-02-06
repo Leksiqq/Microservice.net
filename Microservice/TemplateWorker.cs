@@ -1,7 +1,6 @@
 ﻿using Net.Leksi.MicroService.Common;
 using Net.Leksi.ZkJson;
 using org.apache.zookeeper;
-using System.Text;
 using System.Text.Json;
 
 namespace Net.Leksi.MicroService;
@@ -253,7 +252,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
     {
         StopAsync(StoppingTokenCache).Wait();
     }
-    private bool CanOperate()
+    protected bool CanOperate()
     {
         if (IsSingleton)
         {
@@ -271,7 +270,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
                         && je1.ValueKind is JsonValueKind.String
                         && je1.GetString() is string ts
                         && DateTime.TryParse(ts, out DateTime time)
-                        && DateTime.UtcNow - time < Config.InoperativeDurationWarning
+                        && DateTime.UtcNow - time.ToUniversalTime() < Config.InoperativeDurationWarning
                     )
                     {
                         if (_isLeader)

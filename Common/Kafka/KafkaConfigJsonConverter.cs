@@ -88,6 +88,13 @@ public class KafkaConfigJsonConverter : JsonConverter<KafkaConfigBase>
                         throw new JsonException("'*Topic' can only be string or array!");
                     }
                 }
+                else if(propertyName.Equals(nameof(result.Sender), StringComparison.OrdinalIgnoreCase))
+                {
+                    if (reader.GetString() is string value)
+                    {
+                        result.Sender = value;
+                    }
+                }
                 else
                 {
                     if (reader.GetString() is string value)
@@ -110,6 +117,7 @@ public class KafkaConfigJsonConverter : JsonConverter<KafkaConfigBase>
             writer.WriteString(it.Key, it.Value);
         }
         writer.WriteEndObject();
+        writer.WriteString(nameof(value.Sender).ToLower(), value.Sender);
         if (value is KafkaConfig config)
         {
             WriteList(writer, nameof(config.Topics), config.Topics);
@@ -130,7 +138,7 @@ public class KafkaConfigJsonConverter : JsonConverter<KafkaConfigBase>
     {
         if(list.Count > 0)
         {
-            writer.WritePropertyName(propertyName);
+            writer.WritePropertyName(propertyName.ToLower());
             writer.WriteStartArray();
             foreach (var it in list)
             {
