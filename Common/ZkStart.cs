@@ -31,9 +31,10 @@ public class ZkStart
     private int _connectionTimeout = 0;
     private int _sessionTimeout = 0;
     private Action<WatchedEvent>? _watchedEventHandler = null;
-
-    private ManualResetEventSlim _mres = new();
-
+    private readonly ManualResetEventSlim _mres = new();
+    public string ConnectionString => _connectionString;
+    public int ConnectionTimeout => _connectionTimeout;
+    public int SessionTimeout => _sessionTimeout;
     private ZkStart() { }
     public static ZkStart Create()
     {
@@ -48,11 +49,31 @@ public class ZkStart
         }
         if (configuration[s_connectionTimeoutParam] is string s2 && _connectionTimeout == 0)
         {
-            int.TryParse(s2, out _connectionTimeout);
+            if(!int.TryParse(s2, out _connectionTimeout))
+            {
+                throw new ArgumentException(
+                    message: string.Format(
+                        Constants.InvalidParamType, 
+                        s_connectionTimeoutParam, 
+                        typeof(int), 
+                        configuration[s_connectionTimeoutParam]
+                    )
+                );
+            }
         }
         if (configuration[s_sessionTimeoutParam] is string s3 && _sessionTimeout == 0)
         {
-            int.TryParse(s3, out _sessionTimeout);
+            if(!int.TryParse(s3, out _sessionTimeout))
+            {
+                throw new ArgumentException(
+                    message: string.Format(
+                        Constants.InvalidParamType,
+                        s_sessionTimeoutParam,
+                        typeof(int),
+                        configuration[s_sessionTimeoutParam]
+                    )
+                );
+            }
         }
         return this;
     }
@@ -73,6 +94,7 @@ public class ZkStart
     }
     public ZkStart WithWatchedEventHandler(Action<WatchedEvent> handler)
     {
+        _watchedEventHandler = handler;
         return this;
     }
     public ZooKeeper? Start()

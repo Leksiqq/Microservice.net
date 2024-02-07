@@ -6,9 +6,19 @@ using System.Text.Json;
 namespace Net.Leksi.MicroService;
 public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig : TemplateWorkerConfig, new()
 {
-    private const string s_missedZkVarPathMessage = "'VarPath' is a mandatory Config property!";
     private const string s_stateFormat = "{{\"state\": \"{0}\", \"time\": \"{1:o}\"}}";
     private const string s_singletonStateFormat = "{{\"{0}\": {{\"state\": \"{1}\", \"time\": \"{2:o}\"}}}}";
+
+    private static readonly Action<ILogger, string, Exception?> s_lostLeadershipLogMessage = LoggerMessage.Define<string>(
+        LogLevel.Information,
+        EventIds.Get(nameof(s_lostLeadershipLogMessage)),
+        "Lost leadership: {WorkerId}"
+    );
+    private static readonly Action<ILogger, string, Exception?> s_becomeALeaderLogMessage = LoggerMessage.Define<string>(
+        LogLevel.Information,
+        EventIds.Get(nameof(s_becomeALeaderLogMessage)),
+        "Become a leader: {WorkerId}"
+    );
 
     private const string s_stateVarPath = "$state";
 
@@ -49,16 +59,16 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
 
         IConfiguration conf = _services.GetRequiredService<IConfiguration>();
 
-        if (bool.TryParse(conf["RUNNING_IN_CONTAINER"], out bool ric) && ric && conf["HOSTNAME"] is { })
+        if (bool.TryParse(conf["RUNNING_IN_CONTAINER"], out bool ric) && ric && conf["HOSTNAME"] is string workerId)
         {
-            WorkerId = conf["HOSTNAME"]!;
+            WorkerId = workerId;
         }
         else
         {
             WorkerId = Guid.NewGuid().ToString();
         }
 
-        Name = conf["name"]!;
+        Name = conf[Constants.NamePropertyName]!;
         Config = _services.GetRequiredService<TConfig>();
     }
     protected async sealed override Task ExecuteAsync(CancellationToken stoppingToken)
@@ -162,7 +172,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
 
                 if (string.IsNullOrEmpty(Config.VarPath))
                 {
-                    throw new InvalidOperationException(s_missedZkVarPathMessage);
+                    throw new ArgumentException(string.Format(Constants.MissedMandatoryProperty, nameof(Config), nameof(Config.VarPath)));
                 }
 
                 VarRoot = $"{Config.VarPath}/{Name}";
@@ -189,14 +199,8 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
                     JsonSerializer.Deserialize<ZkStub>("{}", VarSerializerOptions);
                 }
 
-                await BeforeInitializing(stoppingToken);
-
-
-                if (_logger?.IsEnabled(LogLevel.Information) ?? false)
-                {
-                    _logger.LogInformation("{config}", JsonSerializer.Serialize(Config));
-                }
                 await Initialize(stoppingToken);
+
                 LastOperativeTime = DateTime.UtcNow;
                 _isConfigured = true;
                 UpdateState();
@@ -205,7 +209,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
             {
                 if (_logger?.IsEnabled(LogLevel.Critical) ?? false)
                 {
-                    _logger.LogCritical("{ex}", ex.ToString());
+                    LoggingManager.ExceptionThrownLogMessage(_logger, ex.Message, ex.StackTrace!, ex);
                 }
                 _running = false;
             }
@@ -219,7 +223,6 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
     protected abstract Task ProcessInoperativeWarning(TimeSpan inoperativeTime, Exception? lastInoperativeException, CancellationToken stoppingToken);
     protected abstract Task MakeOperative(CancellationToken stoppingToken);
     protected abstract Task Initialize(CancellationToken stoppingToken);
-    protected abstract Task BeforeInitializing(CancellationToken stoppingToken);
     protected void UpdateState()
     {
         DateTime time = (State is State.Idle || State is State.Operate) ? DateTime.UtcNow : LastOperativeTime;
@@ -277,7 +280,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
                         {
                             if (_logger?.IsEnabled(LogLevel.Information) ?? false)
                             {
-                                _logger.LogInformation("{WorkerId} lost leadership!", WorkerId);
+                                s_lostLeadershipLogMessage(_logger, WorkerId, null);
                             }
                             _isLeader = false;
                         }
@@ -289,7 +292,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
             {
                 if (_logger?.IsEnabled(LogLevel.Information) ?? false)
                 {
-                    _logger.LogInformation("{WorkerId} becomes a leader!", WorkerId);
+                    s_becomeALeaderLogMessage(_logger, WorkerId, null);
                 }
                 _isLeader = true;
             }
