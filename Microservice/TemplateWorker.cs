@@ -1,5 +1,7 @@
 ﻿using Net.Leksi.MicroService.Common;
-using Net.Leksi.ZkJson;
+using static Net.Leksi.MicroService.Logging.LoggerMessages;
+using static Net.Leksi.MicroService.Common.Logging.LoggerMessages;
+using Net.Leksi.ZkJson; 
 using org.apache.zookeeper;
 using System.Text.Json;
 
@@ -8,17 +10,6 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
 {
     private const string s_stateFormat = "{{\"state\": \"{0}\", \"time\": \"{1:o}\"}}";
     private const string s_singletonStateFormat = "{{\"{0}\": {{\"state\": \"{1}\", \"time\": \"{2:o}\"}}}}";
-
-    private static readonly Action<ILogger, string, Exception?> s_lostLeadershipLogMessage = LoggerMessage.Define<string>(
-        LogLevel.Information,
-        EventIds.Get(nameof(s_lostLeadershipLogMessage)),
-        "Lost leadership: {WorkerId}"
-    );
-    private static readonly Action<ILogger, string, Exception?> s_becomeALeaderLogMessage = LoggerMessage.Define<string>(
-        LogLevel.Information,
-        EventIds.Get(nameof(s_becomeALeaderLogMessage)),
-        "Become a leader: {WorkerId}"
-    );
 
     private const string s_stateVarPath = "$state";
 
@@ -209,7 +200,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
             {
                 if (_logger?.IsEnabled(LogLevel.Critical) ?? false)
                 {
-                    LoggingManager.ExceptionThrownLogMessage(_logger, ex.Message, ex.StackTrace!, ex);
+                    ExceptionLogMessage(_logger, ex.Message, ex.StackTrace!, ex);
                 }
                 _running = false;
             }
@@ -265,11 +256,11 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
             {
                 if(prop.Name != WorkerId)
                 {
-                    if(
+                    if (
                         prop.Value.EnumerateObject().Where(e => e.Name == "state").FirstOrDefault().Value is JsonElement je
                         && je.ValueKind is JsonValueKind.String
                         && je.GetString() == State.Operate.ToString()
-                        && prop.Value.EnumerateObject().Where(e => e.Name == "time").FirstOrDefault().Value is JsonElement je1 
+                        && prop.Value.EnumerateObject().Where(e => e.Name == "time").FirstOrDefault().Value is JsonElement je1
                         && je1.ValueKind is JsonValueKind.String
                         && je1.GetString() is string ts
                         && DateTime.TryParse(ts, out DateTime time)
@@ -280,7 +271,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
                         {
                             if (_logger?.IsEnabled(LogLevel.Information) ?? false)
                             {
-                                s_lostLeadershipLogMessage(_logger, WorkerId, null);
+                                LostLeadershipLogMessage(_logger, WorkerId, null);
                             }
                             _isLeader = false;
                         }
@@ -292,7 +283,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
             {
                 if (_logger?.IsEnabled(LogLevel.Information) ?? false)
                 {
-                    s_becomeALeaderLogMessage(_logger, WorkerId, null);
+                    BecomeLeaderLogMessage(_logger, WorkerId, null);
                 }
                 _isLeader = true;
             }

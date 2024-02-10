@@ -2,36 +2,25 @@
 using System.Data;
 using System.Text.Json;
 
-namespace Net.Leksi.MicroService.Common;
+namespace Net.Leksi.MicroService.Logging;
 
 public class LoggingManager
 {
     private ILogger _logger = null!;
     private readonly Dictionary<string, Node> _providers = [];
     private bool _canDebug = false;
-
-    public static readonly Action<ILogger, string, string, string, Exception?> DebugLogMessage = LoggerMessage.Define<string, string, string>(
-        LogLevel.Debug,
-        EventIds.Get(nameof(DebugLogMessage)),
-        "[{Location}] {Label}: {Value}"
-    );
-    public static readonly Action<ILogger, string, string, Exception?> ExceptionThrownLogMessage = LoggerMessage.Define<string, string>(
-        LogLevel.Critical,
-        EventIds.Get(nameof(ExceptionThrownLogMessage)),
-        "{Message} {StackTrace}"
-    );
     public void Debug(string label, string value)
     {
         if (_canDebug && _logger is { })
         {
-            DebugLogMessage(_logger, GetLocation(), label, value, null);
+            Log.Debug(_logger, GetLocation(), label, value, null);
         }
     }
     public void SetLoggerFactory(ILoggerFactory loggerFactory)
     {
         if(_logger is null)
         {
-            _logger = loggerFactory.CreateLogger("Debug");
+            _logger = loggerFactory.CreateLogger("DebugLogMessage");
         }
     }
     public void Configure(ILoggingBuilder builder, JsonElement config, JsonSerializerOptions jsonSerializerOptions)

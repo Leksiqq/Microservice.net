@@ -1,12 +1,9 @@
-﻿using Microsoft.Extensions.Logging;
-
-namespace Net.Leksi.MicroService.Common;
+﻿namespace Net.Leksi.MicroService.Common;
 
 public static class Constants
 {
     public const string KafkaMessageTypeName = nameof(KafkaMessageTypeName);
 
-    // Exception message
     public const string InvalidParamType = "Invalid parameter type: {0}. Expected {1}, got {2}.";
     public const string MissedMandatoryParam = "Missed mandatory parameter: {0}.";
     public const string ZookeeperConnectionFailed = "Zookeeper connection failed: {0}.";
@@ -21,8 +18,8 @@ public static class Constants
     public const string LoggingPropertyName = "Logging";
     public const string LogLevelPropertyName = "LogLevel";
     public const string DefaultPropertyName = "Default";
-    public const string BasePropertyName = "$base";
-    public const string DebugLoggerProviderName = "Debug";
+    public const string ScriptPrefix = "$";
+    public const string DebugLoggerProviderName = "DebugLogMessage";
     public const string ConsoleLoggerProviderName = "Console";
     public const string KafkaLoggerProviderName = "Kafka";
 
