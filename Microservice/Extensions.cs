@@ -16,7 +16,9 @@ public static class Extensions
             builder.Services.AddSingleton<ICloudClient>(services =>
             {
                 MinioConfig conf = JsonSerializer.Deserialize<MinioConfig>(json, jsonSerializerOptions)!;
-                services.GetRequiredService<LoggingManager>().Debug(typeof(MinioConfig).FullName!, JsonSerializer.Serialize(conf));
+                services.GetRequiredService<LoggingManager>().Debug(
+                    string.Format("{0}: {1}", typeof(MinioConfig).FullName!, JsonSerializer.Serialize(conf))
+                );
                 return new MinioClientAdapter(conf);
             });
         }
@@ -35,7 +37,9 @@ public static class Extensions
             builder.Services.AddSingleton<IKafkaProducer<TMessage>>(services =>
             {
                 KafkaConfig conf = JsonSerializer.Deserialize<KafkaConfig>(json, jsonSerializerOptions)!;
-                services.GetRequiredService<LoggingManager>().Debug(typeof(KafkaConfig).FullName!, JsonSerializer.Serialize(conf));
+                services.GetRequiredService<LoggingManager>().Debug(
+                    string.Format("{0}: {1}", typeof(KafkaConfig).FullName!, JsonSerializer.Serialize(conf))
+                );
                 return new KafkaProducerAdapter<TMessage>(conf);
             });
         }

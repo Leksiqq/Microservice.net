@@ -1,17 +1,17 @@
 ﻿using Microsoft.Extensions.Logging;
 
-namespace Net.Leksi.MicroService.Common.Logging;
+namespace Net.Leksi.MicroService.Common;
 
 public static class LoggerMessages
 {
-    public static readonly Action<ILogger, string, string, string, Exception?> DebugLogMessage = LoggerMessage.Define<string, string, string>(
+    public static readonly Action<ILogger, string, string, Exception?> Debug = LoggerMessage.Define<string, string>(
     LogLevel.Debug,
-        new EventId(100001, nameof(DebugLogMessage)),
-        "[{Location}] {Label}: {Value}"
+        new EventId(100001, nameof(Debug)),
+        "[{Location}] {Message}"
     );
-    public static readonly Action<ILogger, string, string, Exception?> ExceptionLogMessage = LoggerMessage.Define<string, string>(
+    public static readonly Action<ILogger, string, string, Exception?> Exception = LoggerMessage.Define<string, string>(
     LogLevel.Critical,
-        new EventId(100002, nameof(ExceptionLogMessage)),
+        new EventId(100002, nameof(Exception)),
         "{Message} {StackTrace}"
     );
 }

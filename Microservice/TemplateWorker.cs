@@ -1,7 +1,6 @@
 ﻿using Net.Leksi.MicroService.Common;
-using static Net.Leksi.MicroService.Logging.LoggerMessages;
-using static Net.Leksi.MicroService.Common.Logging.LoggerMessages;
-using Net.Leksi.ZkJson; 
+using Net.Leksi.MicroService.Logging;
+using Net.Leksi.ZkJson;
 using org.apache.zookeeper;
 using System.Text.Json;
 
@@ -200,7 +199,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
             {
                 if (_logger?.IsEnabled(LogLevel.Critical) ?? false)
                 {
-                    ExceptionLogMessage(_logger, ex.Message, ex.StackTrace!, ex);
+                    Common.LoggerMessages.Exception(_logger, ex.Message, ex.StackTrace!, ex);
                 }
                 _running = false;
             }
@@ -271,7 +270,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
                         {
                             if (_logger?.IsEnabled(LogLevel.Information) ?? false)
                             {
-                                LostLeadershipLogMessage(_logger, WorkerId, null);
+                                Logging.LoggerMessages.LostLeadership(_logger, WorkerId, null);
                             }
                             _isLeader = false;
                         }
@@ -283,7 +282,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
             {
                 if (_logger?.IsEnabled(LogLevel.Information) ?? false)
                 {
-                    BecomeLeaderLogMessage(_logger, WorkerId, null);
+                    Logging.LoggerMessages.BecomeLeader(_logger, WorkerId, null);
                 }
                 _isLeader = true;
             }

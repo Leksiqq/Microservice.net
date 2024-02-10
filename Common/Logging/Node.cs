@@ -1,6 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
 
-namespace Net.Leksi.MicroService.Logging;
+namespace Net.Leksi.MicroService.Common;
 
 public class Node
 {

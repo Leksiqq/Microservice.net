@@ -2,26 +2,25 @@
 using System.Data;
 using System.Text.Json;
 
-namespace Net.Leksi.MicroService.Logging;
+namespace Net.Leksi.MicroService.Common;
 
 public class LoggingManager
 {
-    private ILogger _logger = null!;
+    private const string s_in = " in ";
+    private const string s_loggerProvider = "{0}LoggerProvider";
+    private ILogger _debugLogger = null!;
     private readonly Dictionary<string, Node> _providers = [];
     private bool _canDebug = false;
-    public void Debug(string label, string value)
+    public void Debug(string message)
     {
-        if (_canDebug && _logger is { })
+        if (_canDebug && _debugLogger is { })
         {
-            Log.Debug(_logger, GetLocation(), label, value, null);
+            LoggerMessages.Debug(_debugLogger, GetLocation(), message, null);
         }
     }
     public void SetLoggerFactory(ILoggerFactory loggerFactory)
     {
-        if(_logger is null)
-        {
-            _logger = loggerFactory.CreateLogger("DebugLogMessage");
-        }
+        _debugLogger ??= loggerFactory.CreateLogger("Debug");
     }
     public void Configure(ILoggingBuilder builder, JsonElement config, JsonSerializerOptions jsonSerializerOptions)
     {
@@ -55,7 +54,7 @@ public class LoggingManager
                 throw new InvalidOperationException(string.Format(Constants.LoggerProviderNotSupported, prop.Name));
             }
             Node node = new();
-            _providers.Add($"{prop.Name}LoggerProvider", node);
+            _providers.Add(string.Format(s_loggerProvider, prop.Name), node);
             if (
                 prop.Value.EnumerateObject().Where(e => e.Name.Equals(Constants.LogLevelPropertyName, StringComparison.OrdinalIgnoreCase))
                     .Select(e => e.Value).FirstOrDefault() is JsonElement logLevel
@@ -83,7 +82,7 @@ public class LoggingManager
     {
         //return Environment.StackTrace;
         string line = Environment.StackTrace.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)[3];
-        return line[(line.LastIndexOf(" in ") + 4)..];
+        return line[(line.LastIndexOf(s_in) + 4)..];
     }
     private void Fill(Node node, JsonElement json)
     {
@@ -95,7 +94,7 @@ public class LoggingManager
         {
             if (Enum.TryParse(defaultLevel.GetString(), out LogLevel ll))
             {
-                if(ll <= LogLevel.Debug)
+                if (ll <= LogLevel.Debug)
                 {
                     _canDebug = true;
                 }
@@ -131,13 +130,13 @@ public class LoggingManager
     }
     private bool Filter(string? providerName, string? category, LogLevel logLevel)
     {
-        if(providerName?.LastIndexOf('.') is int pos)
+        if (providerName?.LastIndexOf('.') is int pos)
         {
-            if((pos < 0 ? providerName : providerName[(pos + 1) ..]) is string key && _providers.TryGetValue(key, out Node? node))
+            if ((pos < 0 ? providerName : providerName[(pos + 1)..]) is string key && _providers.TryGetValue(key, out Node? node))
             {
                 string[] parts = category?.Split('.') ?? [];
                 Node cur = node;
-                for(int i = 0; i < parts.Length; ++i)
+                for (int i = 0; i < parts.Length; ++i)
                 {
                     if (!cur.Children.TryGetValue(parts[i], out Node? next))
                     {
