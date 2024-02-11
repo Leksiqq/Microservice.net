@@ -45,7 +45,7 @@ public class LoggingManager
                 )
                 {
                     KafkaLoggerConfig conf = JsonSerializer.Deserialize<KafkaLoggerConfig>(json, jsonSerializerOptions)!;
-                    builder.AddProvider(new KafkaLoggerProvider(conf));
+                    builder.AddProvider(new KafkaLoggerProvider(conf, Filter));
                 }
 
             }
@@ -130,6 +130,7 @@ public class LoggingManager
     }
     private bool Filter(string? providerName, string? category, LogLevel logLevel)
     {
+        bool result = false;
         if (providerName?.LastIndexOf('.') is int pos)
         {
             if ((pos < 0 ? providerName : providerName[(pos + 1)..]) is string key && _providers.TryGetValue(key, out Node? node))
@@ -144,9 +145,9 @@ public class LoggingManager
                     }
                     cur = next;
                 }
-                return logLevel >= cur.MinLevel;
+                result = logLevel >= cur.MinLevel;
             }
         }
-        return false;
+        return result;
     }
 }

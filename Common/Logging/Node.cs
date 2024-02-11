@@ -12,8 +12,11 @@ public class Node
         get => _minLevel;
         internal set
         {
-            _minLevel = value;
-            _isMinLevelSet = true;
+            if(!_isMinLevelSet)
+            {
+                _minLevel = value;
+                _isMinLevelSet = true;
+            }
         }
     }
     internal bool IsMinLevelSet => _isMinLevelSet;

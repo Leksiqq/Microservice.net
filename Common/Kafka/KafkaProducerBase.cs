@@ -8,8 +8,8 @@ public class KafkaProducerBase<TMessage>: IDisposable where TMessage : class
 {
     private readonly IProducer<string, string> _producer = null!;
     private readonly string _messageTypeName = typeof(TMessage).FullName!;
-    protected readonly KafkaConfig _config;
-    public KafkaProducerBase(KafkaConfig config)
+    protected readonly KafkaConfigBase _config;
+    public KafkaProducerBase(KafkaConfigBase config)
     {
         _config = config;
         _producer = new ProducerBuilder<string, string>(_config.Properties).Build();
