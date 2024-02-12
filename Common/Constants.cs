@@ -9,6 +9,8 @@ public static class Constants
     public const string ZookeeperConnectionFailed = "Zookeeper connection failed: {0}.";
     public const string MissedMandatoryProperty = "Missed mandatory property: {0}.{1}.";
     public const string LoggerProviderNotSupported = "Logger provider is not supported: {0}.";
+    public const string InvalidConfigType = "Config type must inherit from: {0}, but {1} does not.";
+    public const string InvalidWorkerType = "Worker type must inherit from: {0}, but {1} does not.";
 
     public const string ConfigPropertyName = "config";
     public const string NamePropertyName = "name";

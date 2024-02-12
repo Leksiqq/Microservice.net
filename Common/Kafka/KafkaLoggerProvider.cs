@@ -2,18 +2,11 @@
 
 namespace Net.Leksi.MicroService.Common;
 
-public class KafkaLoggerProvider : ILoggerProvider
+public class KafkaLoggerProvider(KafkaLoggerConfig config, Func<string?, string?, LogLevel, bool> filter, Func<IServiceProvider?> getServices) : ILoggerProvider
 {
-    private readonly KafkaLoggerConfig _config;
-    private readonly Func<string?, string?, LogLevel, bool> _filter;
-    public KafkaLoggerProvider(KafkaLoggerConfig config, Func<string?,string?, LogLevel,bool> filter)
-    {
-        _config = config;
-        _filter = filter;
-    }
     public ILogger CreateLogger(string categoryName)
     {
-        return new KafkaLogger(_config, categoryName, _filter);
+        return new KafkaLogger(config, categoryName, filter, getServices);
     }
     public void Dispose()
     {

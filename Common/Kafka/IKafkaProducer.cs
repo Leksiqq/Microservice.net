@@ -2,7 +2,7 @@
 
 namespace Net.Leksi.MicroService.Common;
 
-public interface IKafkaProducer<TMessage>: IDisposable where TMessage : class
+public interface IKafkaProducer: IDisposable
 {
-    Task<List<DeliveryResult<string, string>>> ProduceAsync(string key, TMessage message, CancellationToken stoppingToken);
+    Task<List<DeliveryResult<string, string>>> ProduceAsync<TMessage>(TMessage message, CancellationToken stoppingToken) where TMessage : KafkaMessageBase;
 }

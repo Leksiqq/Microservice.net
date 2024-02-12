@@ -1,0 +1,35 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-ImapReader2-9e594c97-13ae-4161-903a-e52dc41fd818</UserSecretsId>
+    <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+    <AssemblyName>ImapReader</AssemblyName>
+    <RootNamespace>Net.Leksi.MicroService.ImapReader</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Confluent.Kafka" Version="2.3.0" />
+    <PackageReference Include="MailKit" Version="4.3.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />
+    <PackageReference Include="Minio" Version="6.0.1" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(Configuration)'=='Release'">
+    <PackageReference Include="Net.Leksi.MicroService" Version="1.0.*" />
+    <PackageReference Include="Net.Leksi.MicroService.Common" Version="1.0.*" />
+    <PackageReference Include="Net.Leksi.ZkJson" Version="1.3.*" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(Configuration)'=='Debug'">
+    <ProjectReference Include="..\..\..\..\C#\Microservice\Microservice\Microservice.csproj" />
+    <ProjectReference Include="..\..\..\..\C#\ZkJson\Library\ZkJson.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\..\C#\Microservice\Common\Common.csproj" />
+  </ItemGroup>
+
+</Project>

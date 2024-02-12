@@ -3,5 +3,5 @@
 public abstract class KafkaConfigBase
 {
     public Dictionary<string, string> Properties { get; private init; } = [];
-    public string Sender { get; set; } = string.Empty;
+    public string? Sender { get; set; }
 }

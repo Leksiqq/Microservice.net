@@ -2,6 +2,7 @@
 
 public class TemplateWorkerConfig
 {
+    public string? Name { get; set; }
     public int PollPeriod {  get; set; }
     public string? VarPath { get; set; }
     public TimeSpan InoperativeDurationWarning { get; set; }

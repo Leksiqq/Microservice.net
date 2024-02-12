@@ -1,5 +1,4 @@
 ﻿using Net.Leksi.MicroService.Common;
-using Net.Leksi.MicroService.Logging;
 using Net.Leksi.ZkJson;
 using org.apache.zookeeper;
 using System.Text.Json;
@@ -20,6 +19,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
 
     protected readonly IServiceProvider _services;
     protected readonly ILogger<TemplateWorker<TConfig>>? _logger;
+    protected readonly WorkerId _workerId;
     protected TConfig DefaultConfig { get; private init; } = new()
     {
         PollPeriod = 10000,
@@ -38,28 +38,20 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
     protected ZkJsonSerializer VarSerializer { get; private set; } = null!;
     protected JsonSerializerOptions VarSerializerOptions { get; private set; } = null!;
     protected State State { get; private set; } = State.Idle;
-    protected string WorkerId { get; private set; } = null!;
-    public string Name { get; private init; }
     public TemplateWorker(IServiceProvider services)
     {
         Console.CancelKeyPress += Console_CancelKeyPress;
 
         _services = services;
         _logger = (ILogger<TemplateWorker<TConfig>>?)_services.GetService(typeof(ILogger<>).MakeGenericType([ GetType() ]));
+        _workerId = _services.GetRequiredService<WorkerId>();
 
-        IConfiguration conf = _services.GetRequiredService<IConfiguration>();
-
-        if (bool.TryParse(conf["RUNNING_IN_CONTAINER"], out bool ric) && ric && conf["HOSTNAME"] is string workerId)
-        {
-            WorkerId = workerId;
-        }
-        else
-        {
-            WorkerId = Guid.NewGuid().ToString();
-        }
-
-        Name = conf[Constants.NamePropertyName]!;
         Config = _services.GetRequiredService<TConfig>();
+
+        if(Config.Name is { })
+        {
+            _workerId.Name = Config.Name;
+        }
     }
     protected async sealed override Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -165,7 +157,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
                     throw new ArgumentException(string.Format(Constants.MissedMandatoryProperty, nameof(Config), nameof(Config.VarPath)));
                 }
 
-                VarRoot = $"{Config.VarPath}/{Name}";
+                VarRoot = $"{Config.VarPath}/{_workerId.Name}";
                 VarSerializerOptions = new();
                 VarSerializer = new ZkJsonSerializer()
                 {
@@ -208,7 +200,19 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
 
     protected abstract Task Exiting(CancellationToken stoppingToken);
     protected abstract Task Operate(CancellationToken stoppingToken);
-    protected abstract Task ProcessFail(Exception? lastInoperativeException, CancellationToken stoppingToken);
+    protected virtual async Task ProcessFail(Exception? lastInoperativeException, CancellationToken stoppingToken)
+    {
+        if (_logger?.IsEnabled(LogLevel.Critical) ?? false)
+        {
+            Common.LoggerMessages.Exception(
+                _logger,
+                LastInoperativeException!.Message,
+                lastInoperativeException!.StackTrace!,
+                LastInoperativeException
+                );
+        }
+        await Task.CompletedTask;
+    }
     protected abstract Task ProcessInoperativeError(TimeSpan inoperativeTime, Exception? lastInoperativeException, CancellationToken stoppingToken);
     protected abstract Task ProcessInoperativeWarning(TimeSpan inoperativeTime, Exception? lastInoperativeException, CancellationToken stoppingToken);
     protected abstract Task MakeOperative(CancellationToken stoppingToken);
@@ -222,14 +226,14 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
             {
                 VarSerializer.Reset($"{VarRoot}/{s_stateVarPath}");
                 JsonSerializer.Deserialize<ZkStub>(
-                    string.Format(s_singletonStateFormat, WorkerId, State, time),
+                    string.Format(s_singletonStateFormat, _workerId.Id, State, time),
                     VarSerializerOptions
                 );
             }
         }
         else
         {
-            VarSerializer.Reset($"{VarRoot}/{s_stateVarPath}/{WorkerId}");
+            VarSerializer.Reset($"{VarRoot}/{s_stateVarPath}/{_workerId.Id}");
             JsonSerializer.Deserialize<ZkStub>(
                 string.Format(s_stateFormat, State, time),
                 VarSerializerOptions
@@ -238,7 +242,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
     }
     private async Task DeleteState()
     {
-        VarSerializer.Reset($"{VarRoot}/{s_stateVarPath}/{WorkerId}");
+        VarSerializer.Reset($"{VarRoot}/{s_stateVarPath}/{_workerId.Id}");
         await VarSerializer.DeleteAsync();
     }
     private void Console_CancelKeyPress(object? sender, ConsoleCancelEventArgs e)
@@ -253,7 +257,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
             JsonElement states = JsonSerializer.SerializeToElement(ZkStub.Instance, VarSerializerOptions);
             foreach (JsonProperty prop in states.EnumerateObject())
             {
-                if(prop.Name != WorkerId)
+                if(prop.Name != _workerId.Id)
                 {
                     if (
                         prop.Value.EnumerateObject().Where(e => e.Name == "state").FirstOrDefault().Value is JsonElement je
@@ -270,7 +274,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
                         {
                             if (_logger?.IsEnabled(LogLevel.Information) ?? false)
                             {
-                                Logging.LoggerMessages.LostLeadership(_logger, WorkerId, null);
+                                Logging.LoggerMessages.LostLeadership(_logger, _workerId.Id, null);
                             }
                             _isLeader = false;
                         }
@@ -282,7 +286,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
             {
                 if (_logger?.IsEnabled(LogLevel.Information) ?? false)
                 {
-                    Logging.LoggerMessages.BecomeLeader(_logger, WorkerId, null);
+                    Logging.LoggerMessages.BecomeLeader(_logger, _workerId.Id, null);
                 }
                 _isLeader = true;
             }

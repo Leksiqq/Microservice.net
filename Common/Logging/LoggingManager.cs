@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using System.Data;
 using System.Text.Json;
 
@@ -11,6 +12,7 @@ public class LoggingManager
     private ILogger _debugLogger = null!;
     private readonly Dictionary<string, Node> _providers = [];
     private bool _canDebug = false;
+    private IServiceProvider? _services;
     public void Debug(string message)
     {
         if (_canDebug && _debugLogger is { })
@@ -18,9 +20,10 @@ public class LoggingManager
             LoggerMessages.Debug(_debugLogger, GetLocation(), message, null);
         }
     }
-    public void SetLoggerFactory(ILoggerFactory loggerFactory)
+    public void SetServices(IServiceProvider services)
     {
-        _debugLogger ??= loggerFactory.CreateLogger("Debug");
+        _services = services;
+        _debugLogger ??= services.GetRequiredService<ILoggerFactory>().CreateLogger("Debug");
     }
     public void Configure(ILoggingBuilder builder, JsonElement config, JsonSerializerOptions jsonSerializerOptions)
     {
@@ -45,7 +48,7 @@ public class LoggingManager
                 )
                 {
                     KafkaLoggerConfig conf = JsonSerializer.Deserialize<KafkaLoggerConfig>(json, jsonSerializerOptions)!;
-                    builder.AddProvider(new KafkaLoggerProvider(conf, Filter));
+                    builder.AddProvider(new KafkaLoggerProvider(conf, Filter, GetServices));
                 }
 
             }
@@ -149,5 +152,9 @@ public class LoggingManager
             }
         }
         return result;
+    }
+    private IServiceProvider? GetServices()
+    {
+        return _services;
     }
 }

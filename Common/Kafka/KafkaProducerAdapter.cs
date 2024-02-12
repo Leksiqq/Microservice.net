@@ -2,15 +2,10 @@
 
 namespace Net.Leksi.MicroService.Common;
 
-public class KafkaProducerAdapter<TMessage> : KafkaProducerBase<TMessage>, IKafkaProducer<TMessage> where TMessage : class
+public class KafkaProducerAdapter(IServiceProvider services, KafkaConfig config) : KafkaProducerBase(services, config), IKafkaProducer
 {
-    private readonly new KafkaConfig _config;
-    public KafkaProducerAdapter(KafkaConfig config): base(config) 
+    public async Task<List<DeliveryResult<string, string>>> ProduceAsync<TMessage>(TMessage message, CancellationToken stoppingToken) where TMessage : KafkaMessageBase
     {
-        _config = config;
-    }
-    public async Task<List<DeliveryResult<string, string>>> ProduceAsync(string key, TMessage message, CancellationToken stoppingToken)
-    {
-        return await base.ProduceAsync(key, message, _config.Topics, stoppingToken);
+        return await ProduceAsync<TMessage>(message, config.Topics, stoppingToken);
     }
 }

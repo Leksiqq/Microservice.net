@@ -2,9 +2,8 @@
 
 namespace Net.Leksi.MicroService.Common;
 
-public class KafkaLogMessage
+public class KafkaLogMessage: KafkaMessageBase
 {
-    public string? Sender { get; internal set; }
     public LogLevel LogLevel { get; internal set; }
     public EventId EventId { get; internal set; }
     public object? State { get; internal set; }
