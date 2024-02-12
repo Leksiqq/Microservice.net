@@ -43,7 +43,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
         Console.CancelKeyPress += Console_CancelKeyPress;
 
         _services = services;
-        _logger = (ILogger<TemplateWorker<TConfig>>?)_services.GetService(typeof(ILogger<>).MakeGenericType([ GetType() ]));
+        _logger = _services.GetService<ILogger<TemplateWorker<TConfig>>>();
         _workerId = _services.GetRequiredService<WorkerId>();
 
         Config = _services.GetRequiredService<TConfig>();
@@ -182,6 +182,9 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
                 }
 
                 await Initialize(stoppingToken);
+                _services.GetRequiredService<LoggingManager>().Debug(
+                    string.Format("{0}: {1}", typeof(TConfig).FullName!, JsonSerializer.Serialize(Config))
+                );
 
                 LastOperativeTime = DateTime.UtcNow;
                 _isConfigured = true;

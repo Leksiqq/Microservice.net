@@ -6,7 +6,5 @@ IConfiguration bootstrapConfig = new ConfigurationBuilder()
     .AddEnvironmentVariables()
     .Build();
 
-HostApplicationBuilder builder = Host.CreateApplicationBuilder();
-
 WorkerBuilder<Worker, Config>.Create(bootstrapConfig).Build().Run();
 

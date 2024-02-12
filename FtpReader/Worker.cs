@@ -1,11 +1,24 @@
 ﻿using FluentFTP;
-using Microsoft.VisualBasic;
 using Net.Leksi.MicroService.Common;
 using System.Net;
 
 namespace Net.Leksi.MicroService.FtpReader;
 public class Worker : TemplateWorker<Config>
 {
+    private class FtpLogger(ILogger<TemplateWorker<Config>> logger) : IFtpLogger
+    {
+        public void Log(FtpLogEntry entry)
+        {
+            LogLevel ll = entry.Severity switch 
+            {
+                FtpTraceLevel.Info => LogLevel.Information,
+                FtpTraceLevel.Warn => LogLevel.Warning,
+                FtpTraceLevel.Error => LogLevel.Error,
+                _ => LogLevel.None
+            };
+            logger.LogInformation(entry.Message);
+        }
+    }
     private readonly ICloudClient _storage = null!;
     private readonly IKafkaProducer _kafkaProducer = null!;
     private readonly string _pathPrefix;
@@ -18,6 +31,7 @@ public class Worker : TemplateWorker<Config>
         DefaultConfig.Folder = "/";
         DefaultConfig.Port = 21;
         _client = new AsyncFtpClient();
+        _client.Logger = new FtpLogger(_logger);
         _storage = _services.GetRequiredService<ICloudClient>();
         _kafkaProducer = _services.GetRequiredService<IKafkaProducer>();
         _pathPrefix = Util.CollapseSlashes($"{_storage.Bucket}:{_storage.Folder}/");
@@ -46,6 +60,9 @@ public class Worker : TemplateWorker<Config>
         _client.Host = Config.Host;
         _client.Port = Config.Port;
         _client.Credentials = new NetworkCredential(Config.Login, Config.Password);
+        Console.WriteLine(_client.Host);
+        Console.WriteLine(_client.Port);
+        Console.WriteLine(_client.Credentials);
         await Task.CompletedTask;
     }
     protected override async Task MakeOperative(CancellationToken stoppingToken)
