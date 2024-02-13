@@ -57,7 +57,6 @@ public class KafkaProducerBase: IDisposable
 
         kafkaMessage.Headers.Add(Constants.KafkaMessageTypeName, Encoding.UTF8.GetBytes(typeof(TMessage).FullName!));
 
-
         foreach (string topic in topics)
         {
             result.Add(await _producer.ProduceAsync(topic, kafkaMessage, stoppingToken));

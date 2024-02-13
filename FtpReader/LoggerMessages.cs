@@ -50,4 +50,19 @@ public static class LoggerMessages
         new EventId(400009, nameof(FolderIsOpen)),
         "Ftp folder is open? {Open}"
     );
+    public static readonly Action<ILogger, string, Exception?> FtpClientInfo = LoggerMessage.Define<string>(
+        LogLevel.Information,
+        new EventId(400010, nameof(FtpClientInfo)),
+        "FtpClient: {Message}"
+    );
+    public static readonly Action<ILogger, string, Exception?> FtpClientWarn = LoggerMessage.Define<string>(
+        LogLevel.Information,
+        new EventId(400011, nameof(FtpClientWarn)),
+        "FtpClient: {Message}"
+    );
+    public static readonly Action<ILogger, string, Exception?> FtpClientErr = LoggerMessage.Define<string>(
+        LogLevel.Information,
+        new EventId(400012, nameof(FtpClientErr)),
+        "FtpClient: {Message}"
+    );
 }

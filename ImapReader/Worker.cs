@@ -142,49 +142,52 @@ public class Worker : TemplateWorker<Config>
 
         if(uids.Count > 0)
         {
-            foreach (var item in await _folder.SearchAsync(SearchQuery.Uids(uids), stoppingToken))
+            foreach (UniqueId item in await _folder.SearchAsync(SearchQuery.Uids(uids), stoppingToken))
             {
                 if (stoppingToken.IsCancellationRequested || !CanOperate())
                 {
                     break;
                 }
-                _lastUid = item.Id;
-                if (_services.GetRequiredService<IConfiguration>() is IConfiguration conf && conf["break"] is { } && _lastUid >= 8456)
+                IList<IMessageSummary> summary = _folder.Fetch(new UniqueId[] { item }, MessageSummaryItems.Flags);
+                bool deleted = summary.FirstOrDefault()?.Flags!.Value.HasFlag(MessageFlags.Deleted) ?? false;
+                if (!deleted)
                 {
-                    throw new InvalidOperationException();
-                }
-                if (_logger?.IsEnabled(LogLevel.Information) ?? false)
-                {
-                    LoggerMessages.MessageReceived(_logger, item.Id, null);
-                }
+                    _lastUid = item.Id;
 
-                long ticks;
-                string name;
-
-                while (true)
-                {
-                    ticks = DateTime.UtcNow.Ticks;
-                    name = $"{ticks}-{string.Join(string.Empty, Enumerable.Range(0, 5).Select(i => (char)_rnd.Next('a', 'z' + 1)).ToArray())}";
-                    if(await _storage.FileExists(name, stoppingToken))
+                    if (_logger?.IsEnabled(LogLevel.Information) ?? false)
                     {
-                        break;
+                        LoggerMessages.MessageReceived(_logger, item.Id, null);
+                    }
+
+                    long ticks;
+                    string name;
+
+                    do
+                    {
+                        ticks = DateTime.UtcNow.Ticks;
+                        name = $"{ticks}-{string.Join(string.Empty, Enumerable.Range(0, 5).Select(i => (char)_rnd.Next('a', 'z' + 1)).ToArray())}";
+                    }
+                    while (!(await _storage.FileExists(name, stoppingToken)));
+
+                    MemoryStream ms = new();
+                    await JsonSerializer.SerializeAsync(ms, await _folder.GetMessageAsync(item, stoppingToken), _mimeJsonSerializerOption, stoppingToken);
+                    ms.Flush();
+                    ms.Position = 0;
+
+                    string path = $"{_pathPrefix}{name}";
+
+                    await _storage.UploadFile(ms, path, "application/json", ms.Length, stoppingToken);
+
+                    await _kafkaProducer.ProduceAsync(
+                        new ReceivedFileKafkaMessage { Path = path, },
+                        stoppingToken
+                    );
+
+                    if (Config.DeleteAfterDownload)
+                    {
+                        await _folder.AddFlagsAsync(item, MessageFlags.Deleted, true, stoppingToken);
                     }
                 }
-
-                MemoryStream ms = new();
-                await JsonSerializer.SerializeAsync(ms, await _folder.GetMessageAsync(item, stoppingToken), _mimeJsonSerializerOption, stoppingToken);
-                ms.Flush();
-                ms.Position = 0;
-
-                string path = $"{_pathPrefix}{name}";
-
-                await _storage.UploadFile(ms, path, "application/json", ms.Length, stoppingToken);
-
-                await _kafkaProducer.ProduceAsync(
-                    new ReceivedFileKafkaMessage { Path = path, }, 
-                    stoppingToken
-                );
-
                 SaveLastUid();
                 UpdateState();
             }
