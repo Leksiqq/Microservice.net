@@ -51,18 +51,6 @@ public class Worker : TemplateWorker<Config>
     }
     protected override async Task Initialize(CancellationToken stoppingToken)
     {
-        if (string.IsNullOrEmpty(Config.Host))
-        {
-            Config.Host = DefaultConfig.Host;
-        }
-        if (Config.Port == default)
-        {
-            Config.Port = DefaultConfig.Port;
-        }
-        if (Config.Folder == default)
-        {
-            Config.Folder = DefaultConfig.Folder;
-        }
         _client.Host = Config.Host;
         _client.Port = Config.Port;
         _client.Credentials = new NetworkCredential(Config.Login, Config.Password);
@@ -83,12 +71,15 @@ public class Worker : TemplateWorker<Config>
         {
             _pattern = new Regex(Config.Pattern);
         }
-        _client.Config.TimeConversion = FtpDate.UTC;
-        _client.Config.ListingCustomParser = (l, f, c) =>
+        if (!string.IsNullOrEmpty(Config.ListingParser))
         {
-            Console.WriteLine(l);
-            return null;
-        };
+            _client.Config.ListingCustomParser = Config.ListingParser switch
+            {
+                "linux" => LinuxListingParser.Parse,
+                _ => null
+            };
+        }
+        _client.Config.TimeConversion = FtpDate.UTC;
 
         await Task.CompletedTask;
     }

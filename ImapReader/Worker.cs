@@ -81,18 +81,6 @@ public class Worker : TemplateWorker<Config>
     {
         _lastUidRoot = $"{VarRoot}/{s_lastUidPath}";
 
-        if (string.IsNullOrEmpty(Config.Host))
-        {
-            Config.Host = DefaultConfig.Host;
-        }
-        if (Config.Port == default)
-        {
-            Config.Port = DefaultConfig.Port;
-        }
-        if (Config.Folder == default)
-        {
-            Config.Folder = DefaultConfig.Folder;
-        }
         VarSerializer.Reset(_lastUidRoot);
         if (!await VarSerializer.RootExists())
         {

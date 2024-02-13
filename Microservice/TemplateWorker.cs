@@ -1,6 +1,7 @@
 ﻿using Net.Leksi.MicroService.Common;
 using Net.Leksi.ZkJson;
 using org.apache.zookeeper;
+using System.Reflection;
 using System.Text.Json;
 
 namespace Net.Leksi.MicroService;
@@ -43,7 +44,9 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
         Console.CancelKeyPress += Console_CancelKeyPress;
 
         _services = services;
-        _logger = _services.GetService<ILogger<TemplateWorker<TConfig>>>();
+        _logger = (ILogger<TemplateWorker<TConfig>>)_services.GetRequiredService(
+            typeof(ILogger<>).MakeGenericType([GetType()])
+        );
         _workerId = _services.GetRequiredService<WorkerId>();
 
         Config = _services.GetRequiredService<TConfig>();
@@ -139,17 +142,18 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
         {
             try
             {
-                if (Config.PollPeriod == default)
+                foreach(PropertyInfo pi in typeof(TConfig).GetProperties())
                 {
-                    Config.PollPeriod = DefaultConfig.PollPeriod;
-                }
-                if (Config.InoperativeDurationWarning == default)
-                {
-                    Config.InoperativeDurationWarning = DefaultConfig.InoperativeDurationWarning;
-                }
-                if (Config.InoperativeDurationError == default)
-                {
-                    Config.InoperativeDurationError = DefaultConfig.InoperativeDurationError;
+                    object? defaultValue = pi.PropertyType.IsValueType ? Activator.CreateInstance(pi.PropertyType) : null;
+                    if (
+                        (pi.GetValue(Config) is null || pi.GetValue(Config)!.Equals(defaultValue)) 
+                        && pi.GetValue(DefaultConfig) is not null 
+                        && !pi.GetValue(DefaultConfig)!.Equals(defaultValue)
+                    )
+                    {
+                        Console.WriteLine($"set: {pi} = {pi.GetValue(DefaultConfig)}");
+                        pi.SetValue(Config, pi.GetValue(DefaultConfig));
+                    }
                 }
 
                 if (string.IsNullOrEmpty(Config.VarPath))

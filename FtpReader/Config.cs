@@ -8,4 +8,5 @@ public class Config: FileReceiverConfig
     public bool LogClient { get; set; } = false;
     public string? Encoding { get; set; }
     public string? Pattern { get; set; }
+    public string? ListingParser { get; set;}
 }
