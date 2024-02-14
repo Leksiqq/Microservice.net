@@ -1,5 +1,6 @@
 using MailKit;
 using MailKit.Search;
+using MimeKit;
 using Net.Leksi.MicroService.Common;
 using Net.Leksi.ZkJson;
 using System.Text.Json;
@@ -9,7 +10,6 @@ namespace Net.Leksi.MicroService.ImapReader;
 public class Worker : TemplateWorker<Config>
 {
     private const string s_lastUidPath = "lastuid";
-
 
     private readonly Client _client = null!;
     private readonly JsonSerializerOptions _mimeJsonSerializerOption = new() { WriteIndented = true, };
@@ -23,16 +23,16 @@ public class Worker : TemplateWorker<Config>
     private IMailFolder _folder = null!;
     protected override bool IsOperative => _client.IsConnected && _client.IsAuthenticated;
 
-    public Worker(IServiceProvider services) : base(services) 
+    public Worker(IServiceProvider services) : base(services)
     {
         IsSingleton = true;
         DefaultConfig.Folder = "INBOX";
         DefaultConfig.Port = 143;
+        
         _mimeJsonSerializerOption.Converters.Add(new MimeMessageJsonConverter());
         _client = new Client();
         _storage = _services.GetRequiredService<ICloudClient>();
         _kafkaProducer = _services.GetRequiredService<IKafkaProducer>();
-        _pathPrefix = Util.CollapseSlashes($"{_storage.Bucket}:{_storage.Folder}/");
     }
     protected override async Task MakeOperative(CancellationToken stoppingToken)
     {
@@ -46,7 +46,7 @@ public class Worker : TemplateWorker<Config>
             {
                 LoggerMessages.ClientReconnecting(_logger, null);
             }
-            else if(_folder is null || !_folder.IsOpen)
+            else if (_folder is null || !_folder.IsOpen)
             {
                 LoggerMessages.ClientReopenningFolder(_logger, null);
             }
@@ -55,13 +55,13 @@ public class Worker : TemplateWorker<Config>
         {
             if (!_client.IsConnected)
             {
-                await _client.ConnectAsync(Config.Host, Config.Port, false, stoppingToken);
+                await _client.ConnectAsync(Config.Host ?? "localhost", Config.Port ?? 0, false, stoppingToken);
             }
             if (!_client.IsAuthenticated)
             {
                 await _client.AuthenticateAsync(Config.Login, Config.Password, stoppingToken);
             }
-            if(_folder is null || !_folder.IsOpen)
+            if (_folder is null || !_folder.IsOpen)
             {
                 _folder = await _client.GetFolderAsync(Config.Folder, stoppingToken);
             }
@@ -85,7 +85,7 @@ public class Worker : TemplateWorker<Config>
         if (!await VarSerializer.RootExists())
         {
             JsonSerializer.Deserialize<ZkStub>(
-                JsonSerializer.SerializeToElement(0), 
+                JsonSerializer.SerializeToElement(0),
                 VarSerializerOptions
             );
         }
@@ -128,7 +128,7 @@ public class Worker : TemplateWorker<Config>
 
         List<UniqueId> uids = Range(_lastUid + 1, _folder.UidNext!.Value.Id).ToList();
 
-        if(uids.Count > 0)
+        if (uids.Count > 0)
         {
             foreach (UniqueId item in await _folder.SearchAsync(SearchQuery.Uids(uids), stoppingToken))
             {
@@ -147,31 +147,32 @@ public class Worker : TemplateWorker<Config>
                         LoggerMessages.MessageReceived(_logger, item.Id, null);
                     }
 
+
+                    MimeMessage message = await _folder.GetMessageAsync(item, stoppingToken);
+
                     long ticks;
-                    string name;
+                    string path;
 
                     do
                     {
                         ticks = DateTime.UtcNow.Ticks;
-                        name = $"{ticks}-{string.Join(string.Empty, Enumerable.Range(0, 5).Select(i => (char)_rnd.Next('a', 'z' + 1)).ToArray())}";
+                        path = $"/{_storage.Folder}/{ticks}/{string.Join(string.Empty, Enumerable.Range(0, 5).Select(i => (char)_rnd.Next('a', 'z' + 1)).ToArray())}";
                     }
-                    while (!(await _storage.FileExists(name, stoppingToken)));
+                    while (!(await _storage.FileExists(path, stoppingToken)));
 
                     MemoryStream ms = new();
                     await JsonSerializer.SerializeAsync(ms, await _folder.GetMessageAsync(item, stoppingToken), _mimeJsonSerializerOption, stoppingToken);
                     ms.Flush();
                     ms.Position = 0;
 
-                    string path = $"{_pathPrefix}{name}";
-
                     await _storage.UploadFile(ms, path, "application/json", ms.Length, stoppingToken);
 
                     await _kafkaProducer.ProduceAsync(
-                        new ReceivedFileKafkaMessage { Path = path, },
+                        new ReceivedFilesKafkaMessage { Path = $"{_storage.Bucket}:{path}", },
                         stoppingToken
                     );
 
-                    if (Config.DeleteAfterDownload)
+                    if (Config.DeleteAfterDownload is bool b && b)
                     {
                         await _folder.AddFlagsAsync(item, MessageFlags.Deleted, true, stoppingToken);
                     }
@@ -192,7 +193,7 @@ public class Worker : TemplateWorker<Config>
     }
     private static IEnumerable<UniqueId> Range(uint start, uint finish)
     {
-        for(uint id = start; id < finish; ++id) 
+        for (uint id = start; id < finish; ++id)
         {
             yield return new UniqueId(id);
         }
@@ -205,6 +206,6 @@ public class Worker : TemplateWorker<Config>
     private void SaveLastUid()
     {
         VarSerializer.Reset(_lastUidRoot);
-        JsonSerializer.Deserialize<ZkStub>(_lastUid.ToString(), VarSerializerOptions);
+        JsonSerializer.Deserialize<ZkStub>(_lastUid, VarSerializerOptions);
     }
 }

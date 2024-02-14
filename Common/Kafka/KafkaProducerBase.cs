@@ -1,7 +1,7 @@
 ﻿using Confluent.Kafka;
-using System.Text.Json;
-using System.Text;
 using Microsoft.Extensions.DependencyInjection;
+using System.Text;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Net.Leksi.MicroService.Common;
@@ -54,7 +54,6 @@ public class KafkaProducerBase: IDisposable
         {
             kafkaMessage.Key = keyStr;
         }
-
         kafkaMessage.Headers.Add(Constants.KafkaMessageTypeName, Encoding.UTF8.GetBytes(typeof(TMessage).FullName!));
 
         foreach (string topic in topics)

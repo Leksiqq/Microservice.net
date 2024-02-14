@@ -1,12 +1,25 @@
 ﻿using FluentFTP;
+using Minio.DataModel;
 using Net.Leksi.MicroService.Common;
+using Net.Leksi.ZkJson;
+using Org.BouncyCastle.Asn1.X509;
 using System.Net;
+using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace Net.Leksi.MicroService.FtpReader;
 public class Worker : TemplateWorker<Config>
 {
+    private const string s_lastTimePath = "lasttime";
+    private const string s_lastNamePath = "lastname";
+
+    private static readonly Regex s_fullTimeListingPattern = new(
+        "^(?<permissions>(?<d>[dl-])(?<op>(?<or>[r-])(?<ow>[w-])(?<ox>[x-]))(?<gp>(?<gr>[r-])(?<gw>[w-])(?<gx>[x-]))(?<ap>(?<ar>[r-])(?<aw>[w-])(?<ax>[x-])))\\s+\\d+\\s+"
+            + "(?<user>.+?)\\s+(?<group>.+?)\\s+(?<size>\\d+)\\s+"
+            + "(?<timestamp>\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2}\\.\\d{9}\\s+[+-]\\d{4})\\s+(?<name>[^.].*?)(?<link>\\s+->\\s(?<src>.+))?$"
+        );
     private class FtpLogger(ILogger<TemplateWorker<Config>> logger) : IFtpLogger
     {
         public void Log(FtpLogEntry entry)
@@ -29,18 +42,37 @@ public class Worker : TemplateWorker<Config>
     private readonly IKafkaProducer _kafkaProducer = null!;
     private readonly string _pathPrefix;
     private readonly AsyncFtpClient _client;
+    private readonly PriorityQueue<FileStat, object> _queue = new();
+    private readonly Dictionary<string, FileStat> _dict = [];
+    private readonly JsonSerializerOptions _fileStatJsonSerializerOption = new() { WriteIndented = true, };
+
     private bool _folderIsOpen = false;
-    private Regex? _pattern = null; 
+    private Regex? _pattern = null;
+    private long _lastTime = 0;
+    private string _lastName = string.Empty;
+    private string _lastTimeRoot = null!;
+    private string _lastNameRoot = null!;
+    private long _prevTicks = 0;
+    private int _counter = 0;
     protected override bool IsOperative => _client.IsConnected && _client.IsAuthenticated && _folderIsOpen;
     public Worker(IServiceProvider services) : base(services)
     {
         IsSingleton = true;
         DefaultConfig.Login = "anonymous";
         DefaultConfig.Port = 21;
+        DefaultConfig.FullTimeListing = true;
+        DefaultConfig.SizeChangeTimeout = 10000;
+        DefaultConfig.ListingSort = ListingSort.Created;
+
         _client = new AsyncFtpClient();
         _storage = _services.GetRequiredService<ICloudClient>();
         _kafkaProducer = _services.GetRequiredService<IKafkaProducer>();
         _pathPrefix = Util.CollapseSlashes($"{_storage.Bucket}:{_storage.Folder}/");
+    }
+    public Worker WithCustomListingParser(FtpConfig.CustomParser customListingParser)
+    {
+        Config.ListingParser = customListingParser;
+        return this;
     }
     protected override async Task Exiting(CancellationToken stoppingToken)
     {
@@ -52,9 +84,9 @@ public class Worker : TemplateWorker<Config>
     protected override async Task Initialize(CancellationToken stoppingToken)
     {
         _client.Host = Config.Host;
-        _client.Port = Config.Port;
+        _client.Port = Config.Port ?? 0;
         _client.Credentials = new NetworkCredential(Config.Login, Config.Password);
-        if (Config.LogClient)
+        if (Config.LogClient is bool b && b)
         {
             _client.Logger = new FtpLogger(_logger!);
         }
@@ -71,17 +103,42 @@ public class Worker : TemplateWorker<Config>
         {
             _pattern = new Regex(Config.Pattern);
         }
-        if (!string.IsNullOrEmpty(Config.ListingParser))
+        if ((Config.FullTimeListing is null || (Config.FullTimeListing is bool b1 && !b1)) && Config.ListingParser is { })
         {
-            _client.Config.ListingCustomParser = Config.ListingParser switch
-            {
-                "linux" => LinuxListingParser.Parse,
-                _ => null
-            };
+            _client.Config.ListingCustomParser = Config.ListingParser;
         }
         _client.Config.TimeConversion = FtpDate.UTC;
 
-        await Task.CompletedTask;
+        _lastTimeRoot = $"{VarRoot}/{s_lastTimePath}";
+        _lastNameRoot = $"{VarRoot}/{s_lastNamePath}";
+
+        if(Config.ListingSort is ListingSort.Created)
+        {
+            VarSerializer.Reset(_lastNameRoot);
+            await VarSerializer.DeleteAsync();
+            VarSerializer.Reset(_lastTimeRoot);
+            if (!await VarSerializer.RootExists())
+            {
+                JsonSerializer.Deserialize<ZkStub>(
+                    JsonSerializer.SerializeToElement(_lastTime),
+                    VarSerializerOptions
+                );
+            }
+        }
+        else
+        {
+            VarSerializer.Reset(_lastTimeRoot);
+            await VarSerializer.DeleteAsync();
+            VarSerializer.Reset(_lastNameRoot);
+            if (!await VarSerializer.RootExists())
+            {
+                JsonSerializer.Deserialize<ZkStub>(
+                    JsonSerializer.SerializeToElement(_lastName),
+                    VarSerializerOptions
+                );
+            }
+        }
+
     }
     protected override async Task MakeOperative(CancellationToken stoppingToken)
     {
@@ -121,17 +178,264 @@ public class Worker : TemplateWorker<Config>
     }
     protected override async Task Operate(CancellationToken stoppingToken)
     {
-        Console.WriteLine(_client.Encoding);
-        Console.WriteLine(await _client.GetWorkingDirectory(stoppingToken));
-        FtpListItem[] list = await _client.GetListing(stoppingToken);
-        foreach (FtpListItem item in list)
+        RefreshLast();
+        int count = 0;
+        await foreach (FtpListItem item in GetListing(stoppingToken))
         {
-            if(item.Type is FtpObjectType.File && (_pattern?.IsMatch(item.Name) ?? true))
+            if (stoppingToken.IsCancellationRequested || !CanOperate())
             {
-                Console.WriteLine($"{item.FullName}, {item.RawCreated}, {item.Created}");
+                break;
+            }
+            if (item.Type is FtpObjectType.File && (_pattern?.IsMatch(item.Name) ?? true) && IsNew(item))
+            {
+                Console.WriteLine(item.Input);
+                if(_dict.TryGetValue(item.FullName, out FileStat? stat))
+                {
+                    if(item.Size != stat.Size)
+                    {
+                        stat.ChangedSize = DateTime.UtcNow;
+                        stat.Size = item.Size;
+                    }
+                }
+                else
+                {
+                    stat = new FileStat 
+                    { 
+                        Created = item.Created,
+                        Size = item.Size,
+                        ChangedSize = DateTime.UtcNow,
+                        FullName = item.FullName,
+                        Name = item.Name,
+                    };
+                    _dict.Add(item.FullName, stat);
+                    _queue.Enqueue(stat, Config.ListingSort is ListingSort.Created ? stat.Created : stat.Name);
+                }
+                ++count;
+            }
+        }
+        if(count > 0)
+        {
+            Console.WriteLine();
+        }
+
+        DateTime now = DateTime.UtcNow;
+        while (_queue.Count > 0)
+        {
+            FileStat stat = _queue.Peek();
+            if((now - stat.ChangedSize).TotalMilliseconds >= Config.SizeChangeTimeout)
+            {
+                MemoryStream ms = new();
+                await _client.DownloadStream(ms, stat.FullName, token: stoppingToken);
+                stat.Content = ms.ToArray();
+                long ticks;
+                string name;
+                do
+                {
+                    ticks = DateTime.UtcNow.Ticks;
+                    if (ticks > _prevTicks)
+                    {
+                        _prevTicks = ticks;
+                        _counter = 0;
+                    }
+                    ++_counter;
+                    name = $"{ticks}-{_counter:D8}";
+                }
+                while (!(await _storage.FileExists(name, stoppingToken)));
+
+                string path = $"{_pathPrefix}{name}";
+
+                await JsonSerializer.SerializeAsync(ms, stat, _fileStatJsonSerializerOption, stoppingToken);
+                ms.Flush();
+                ms.Position = 0;
+
+                await _storage.UploadFile(ms, path, "application/json", ms.Length, stoppingToken);
+
+                await _kafkaProducer.ProduceAsync(
+                    new ReceivedFilesKafkaMessage { Path = path, },
+                    stoppingToken
+                );
+
+                if (Config.DeleteAfterDownload is bool b && b)
+                {
+                    await _client.DeleteFile(stat.FullName, stoppingToken);
+                }
+
+                _queue.Dequeue();
+                _dict.Remove(stat.FullName);
+                _lastTime = stat.Created.Ticks;
+                _lastName = stat.Name;
+                SaveLast();
+                UpdateState();
+            }
+            else
+            {
+                break;
             }
         }
     }
+
+    private bool IsNew(FtpListItem item)
+    {
+        if (Config.ListingSort is ListingSort.Created)
+        {
+            return item.Created.Ticks > _lastTime;
+        }
+        return item.Name.CompareTo(_lastName) > 0;
+    }
+
+    private void SaveLast()
+    {
+        if(Config.ListingSort is ListingSort.Created)
+        {
+            VarSerializer.Reset(_lastTimeRoot);
+            JsonSerializer.Deserialize<ZkStub>(_lastTime, VarSerializerOptions);
+        }
+        else
+        {
+            VarSerializer.Reset(_lastNameRoot);
+            JsonSerializer.Deserialize<ZkStub>($"\"{_lastName}\"", VarSerializerOptions);
+        }
+    }
+
+    private void RefreshLast()
+    {
+        if (Config.ListingSort is ListingSort.Created)
+        {
+            VarSerializer.Reset(_lastTimeRoot);
+            _lastTime = JsonSerializer.Deserialize<long>(JsonSerializer.SerializeToElement(ZkStub.Instance, VarSerializerOptions));
+        }
+        else
+        {
+            VarSerializer.Reset(_lastNameRoot);
+            _lastName = JsonSerializer.Deserialize<string>(JsonSerializer.SerializeToElement(ZkStub.Instance, VarSerializerOptions))!;
+        }
+    }
+
+    private async IAsyncEnumerable<FtpListItem> GetListing([EnumeratorCancellation]CancellationToken stoppingToken)
+    {
+        if (Config.FullTimeListing is null || (Config.FullTimeListing is bool b && !b))
+        {
+            foreach (FtpListItem item in await _client.GetListing(stoppingToken))
+            {
+                if (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                yield return item;
+            }
+        }
+        else
+        {
+            string path = await _client.GetWorkingDirectory(stoppingToken);
+            foreach(string line in await _client.ExecuteDownloadText("LIST --full-time", stoppingToken))
+            {
+                if (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                Match match = s_fullTimeListingPattern.Match(line);
+                if (match.Success)
+                {
+                    int chmod = 0;
+                    FtpPermission ownerPermission = FtpPermission.None;
+                    FtpPermission groupPermission = FtpPermission.None;
+                    FtpPermission otherPermission = FtpPermission.None;
+
+                    if (match.Groups["or"].Value == "r")
+                    {
+                        ownerPermission |= FtpPermission.Read;
+                        chmod |= 4;
+                    }
+                    if (match.Groups["ow"].Value == "w")
+                    {
+                        ownerPermission |= FtpPermission.Write;
+                        chmod |= 2;
+                    }
+                    if (match.Groups["ox"].Value == "x")
+                    {
+                        ownerPermission |= FtpPermission.Execute;
+                        chmod |= 1;
+                    }
+                    chmod <<= 3;
+
+                    if (match.Groups["gr"].Value == "r")
+                    {
+                        groupPermission |= FtpPermission.Read;
+                        chmod |= 4;
+                    }
+                    if (match.Groups["gw"].Value == "w")
+                    {
+                        groupPermission |= FtpPermission.Write;
+                        chmod |= 2;
+                    }
+                    if (match.Groups["gx"].Value == "x")
+                    {
+                        groupPermission |= FtpPermission.Execute;
+                        chmod |= 1;
+                    }
+                    chmod <<= 3;
+
+                    if (match.Groups["ar"].Value == "r")
+                    {
+                        otherPermission |= FtpPermission.Read;
+                        chmod |= 4;
+                    }
+                    if (match.Groups["aw"].Value == "w")
+                    {
+                        otherPermission |= FtpPermission.Write;
+                        chmod |= 2;
+                    }
+                    if (match.Groups["ax"].Value == "x")
+                    {
+                        otherPermission |= FtpPermission.Execute;
+                        chmod |= 1;
+                    }
+
+                    DateTime timestamp;
+                    if (!DateTime.TryParse(match.Groups["timestamp"].Value, out timestamp))
+                    {
+                        timestamp = DateTime.MinValue;
+                    }
+
+                    if (!int.TryParse(match.Groups["size"].Value, out int size))
+                    {
+                        size = 0;
+                    }
+
+                    FtpListItem result = new()
+                    {
+                        Chmod = chmod,
+                        FullName = string.Format("{0}/{1}", path, match.Groups["name"].Value),
+                        GroupPermissions = groupPermission,
+                        OwnerPermissions = ownerPermission,
+                        OthersPermissions = otherPermission,
+                        Input = line,
+                        Created = timestamp.ToUniversalTime(),
+                        Modified = timestamp.ToUniversalTime(),
+                        Name = match.Groups["name"].Value,
+                        RawCreated = timestamp,
+                        RawModified = timestamp,
+                        RawPermissions = match.Groups["permissions"].Value,
+                        RawGroup = match.Groups["gp"].Value,
+                        RawOwner = match.Groups["op"].Value,
+                        Type = match.Groups["d"].Value switch { 
+                            "d" => FtpObjectType.Directory,
+                            "l" => FtpObjectType.Link,
+                            _ => FtpObjectType.File
+                        },
+                        SubType = match.Groups["d"].Value == "d" ? match.Groups["name"].Value switch { 
+                            "." => FtpObjectSubType.SelfDirectory, 
+                            ".." => FtpObjectSubType.ParentDirectory,
+                            _ => FtpObjectSubType.SubDirectory
+                        } : FtpObjectSubType.Unknown,
+                        Size = size,
+                    };
+                    yield return result;
+                }
+            }
+        }
+    }
+
     protected override async Task ProcessInoperativeWarning(TimeSpan inoperativeTime, Exception? lastInoperativeException, CancellationToken cancellationToken)
     {
         if (_logger?.IsEnabled(LogLevel.Warning) ?? false)

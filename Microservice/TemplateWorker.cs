@@ -124,7 +124,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
                     }
 
                 }
-                int msLeft = Config!.PollPeriod - (int)(DateTime.UtcNow - start).TotalMilliseconds;
+                int msLeft = (Config!.PollPeriod ?? 0) - (int)(DateTime.UtcNow - start).TotalMilliseconds;
                 try
                 {
                     await Task.Delay(msLeft >= s_minDelay ? msLeft : s_minDelay, stoppingToken);
@@ -144,11 +144,9 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
             {
                 foreach(PropertyInfo pi in typeof(TConfig).GetProperties())
                 {
-                    object? defaultValue = pi.PropertyType.IsValueType ? Activator.CreateInstance(pi.PropertyType) : null;
                     if (
-                        (pi.GetValue(Config) is null || pi.GetValue(Config)!.Equals(defaultValue)) 
+                        pi.GetValue(Config) is null
                         && pi.GetValue(DefaultConfig) is not null 
-                        && !pi.GetValue(DefaultConfig)!.Equals(defaultValue)
                     )
                     {
                         Console.WriteLine($"set: {pi} = {pi.GetValue(DefaultConfig)}");
