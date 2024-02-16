@@ -6,5 +6,9 @@ IConfiguration bootstrapConfig = new ConfigurationBuilder()
     .AddEnvironmentVariables()
     .Build();
 
-WorkerBuilder<Worker, Config>.Create(bootstrapConfig).Build().Run();
+WorkerBuilder<Worker, Config>.Create(bootstrapConfig)
+    .AddKafkaProducer("kafka")
+    .AddCloudClient("storage")
+    .Build()
+    .Run();
 

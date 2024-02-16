@@ -1,8 +1,6 @@
 ﻿using FluentFTP;
-using Minio.DataModel;
 using Net.Leksi.MicroService.Common;
 using Net.Leksi.ZkJson;
-using Org.BouncyCastle.Asn1.X509;
 using System.Net;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -10,16 +8,11 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace Net.Leksi.MicroService.FtpReader;
-public class Worker : TemplateWorker<Config>
+public partial class Worker : TemplateWorker<Config>
 {
     private const string s_lastTimePath = "lasttime";
     private const string s_lastNamePath = "lastname";
-
-    private static readonly Regex s_fullTimeListingPattern = new(
-        "^(?<permissions>(?<d>[dl-])(?<op>(?<or>[r-])(?<ow>[w-])(?<ox>[x-]))(?<gp>(?<gr>[r-])(?<gw>[w-])(?<gx>[x-]))(?<ap>(?<ar>[r-])(?<aw>[w-])(?<ax>[x-])))\\s+\\d+\\s+"
-            + "(?<user>.+?)\\s+(?<group>.+?)\\s+(?<size>\\d+)\\s+"
-            + "(?<timestamp>\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2}\\.\\d{9}\\s+[+-]\\d{4})\\s+(?<name>[^.].*?)(?<link>\\s+->\\s(?<src>.+))?$"
-        );
+    private const string s_applicationOctetStream = "application/octet-stream";
     private class FtpLogger(ILogger<TemplateWorker<Config>> logger) : IFtpLogger
     {
         public void Log(FtpLogEntry entry)
@@ -39,12 +32,10 @@ public class Worker : TemplateWorker<Config>
         }
     }
     private readonly ICloudClient _storage = null!;
-    private readonly IKafkaProducer _kafkaProducer = null!;
-    private readonly string _pathPrefix;
+    private readonly KafkaProducer _kafkaProducer = null!;
     private readonly AsyncFtpClient _client;
     private readonly PriorityQueue<FileStat, object> _queue = new();
     private readonly Dictionary<string, FileStat> _dict = [];
-    private readonly JsonSerializerOptions _fileStatJsonSerializerOption = new() { WriteIndented = true, };
 
     private bool _folderIsOpen = false;
     private Regex? _pattern = null;
@@ -52,8 +43,6 @@ public class Worker : TemplateWorker<Config>
     private string _lastName = string.Empty;
     private string _lastTimeRoot = null!;
     private string _lastNameRoot = null!;
-    private long _prevTicks = 0;
-    private int _counter = 0;
     protected override bool IsOperative => _client.IsConnected && _client.IsAuthenticated && _folderIsOpen;
     public Worker(IServiceProvider services) : base(services)
     {
@@ -65,9 +54,8 @@ public class Worker : TemplateWorker<Config>
         DefaultConfig.ListingSort = ListingSort.Created;
 
         _client = new AsyncFtpClient();
-        _storage = _services.GetRequiredService<ICloudClient>();
-        _kafkaProducer = _services.GetRequiredService<IKafkaProducer>();
-        _pathPrefix = Util.CollapseSlashes($"{_storage.Bucket}:{_storage.Folder}/");
+        _storage = _services.GetRequiredKeyedService<ICloudClient>("storage");
+        _kafkaProducer = _services.GetRequiredKeyedService<KafkaProducer>("kafka");
     }
     public Worker WithCustomListingParser(FtpConfig.CustomParser customListingParser)
     {
@@ -140,6 +128,36 @@ public class Worker : TemplateWorker<Config>
         }
 
     }
+    protected override async Task ProcessInoperativeWarning(TimeSpan inoperativeTime, Exception? lastInoperativeException, CancellationToken cancellationToken)
+    {
+        if (_logger?.IsEnabled(LogLevel.Warning) ?? false)
+        {
+            if (!_client.IsConnected)
+            {
+                LoggerMessages.ClientNotConnectedWarn(_logger, inoperativeTime, LastInoperativeException);
+            }
+            if (!_client.IsAuthenticated)
+            {
+                LoggerMessages.ClientNotAuthenticatedWarn(_logger, inoperativeTime, LastInoperativeException);
+            }
+        }
+        await Task.CompletedTask;
+    }
+    protected override async Task ProcessInoperativeError(TimeSpan inoperativeTime, Exception? lastInoperativeException, CancellationToken cancellationToken)
+    {
+        if (_logger?.IsEnabled(LogLevel.Error) ?? false)
+        {
+            if (!_client.IsConnected)
+            {
+                LoggerMessages.ClientNotConnectedErr(_logger, inoperativeTime, LastInoperativeException);
+            }
+            if (!_client.IsAuthenticated)
+            {
+                LoggerMessages.ClientNotAuthenticatedErr(_logger, inoperativeTime, LastInoperativeException);
+            }
+        }
+        await Task.CompletedTask;
+    }
     protected override async Task MakeOperative(CancellationToken stoppingToken)
     {
         if (_logger?.IsEnabled(LogLevel.Information) ?? false)
@@ -188,7 +206,6 @@ public class Worker : TemplateWorker<Config>
             }
             if (item.Type is FtpObjectType.File && (_pattern?.IsMatch(item.Name) ?? true) && IsNew(item))
             {
-                Console.WriteLine(item.Input);
                 if(_dict.TryGetValue(item.FullName, out FileStat? stat))
                 {
                     if(item.Size != stat.Size)
@@ -213,10 +230,6 @@ public class Worker : TemplateWorker<Config>
                 ++count;
             }
         }
-        if(count > 0)
-        {
-            Console.WriteLine();
-        }
 
         DateTime now = DateTime.UtcNow;
         while (_queue.Count > 0)
@@ -224,34 +237,21 @@ public class Worker : TemplateWorker<Config>
             FileStat stat = _queue.Peek();
             if((now - stat.ChangedSize).TotalMilliseconds >= Config.SizeChangeTimeout)
             {
+                StoredFolder storedFolder = _services.GetRequiredService<StoredFolder>();
+                StoredFile storedFile = new();
+                storedFolder.Files.Add(storedFile);
+
                 MemoryStream ms = new();
+
                 await _client.DownloadStream(ms, stat.FullName, token: stoppingToken);
-                stat.Content = ms.ToArray();
-                long ticks;
-                string name;
-                do
-                {
-                    ticks = DateTime.UtcNow.Ticks;
-                    if (ticks > _prevTicks)
-                    {
-                        _prevTicks = ticks;
-                        _counter = 0;
-                    }
-                    ++_counter;
-                    name = $"{ticks}-{_counter:D8}";
-                }
-                while (!(await _storage.FileExists(name, stoppingToken)));
 
-                string path = $"{_pathPrefix}{name}";
-
-                await JsonSerializer.SerializeAsync(ms, stat, _fileStatJsonSerializerOption, stoppingToken);
                 ms.Flush();
                 ms.Position = 0;
 
-                await _storage.UploadFile(ms, path, "application/json", ms.Length, stoppingToken);
+                storedFile.Path = await _storage.UploadFile(ms, stat.Name, s_applicationOctetStream, ms.Length, stoppingToken);
 
                 await _kafkaProducer.ProduceAsync(
-                    new ReceivedFilesKafkaMessage { Path = path, },
+                    new ReceivedFilesKafkaMessage { StoredFolder = storedFolder, },
                     stoppingToken
                 );
 
@@ -273,7 +273,8 @@ public class Worker : TemplateWorker<Config>
             }
         }
     }
-
+    [GeneratedRegex(@"^(?<permissions>(?<d>[dl-])(?<op>(?<or>[r-])(?<ow>[w-])(?<ox>[x-]))(?<gp>(?<gr>[r-])(?<gw>[w-])(?<gx>[x-]))(?<ap>(?<ar>[r-])(?<aw>[w-])(?<ax>[x-])))\s+\d+\s+(?<user>.+?)\s+(?<group>.+?)\s+(?<size>\d+)\s+(?<timestamp>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{9}\s+[+-]\d{4})\s+(?<name>[^.].*?)(?<link>\s+->\s(?<src>.+))?$")]
+    private static partial Regex FullTimeListingPattern();
     private bool IsNew(FtpListItem item)
     {
         if (Config.ListingSort is ListingSort.Created)
@@ -333,7 +334,7 @@ public class Worker : TemplateWorker<Config>
                 {
                     break;
                 }
-                Match match = s_fullTimeListingPattern.Match(line);
+                Match match = FullTimeListingPattern().Match(line);
                 if (match.Success)
                 {
                     int chmod = 0;
@@ -391,8 +392,7 @@ public class Worker : TemplateWorker<Config>
                         chmod |= 1;
                     }
 
-                    DateTime timestamp;
-                    if (!DateTime.TryParse(match.Groups["timestamp"].Value, out timestamp))
+                    if (!DateTime.TryParse(match.Groups["timestamp"].Value, out DateTime timestamp))
                     {
                         timestamp = DateTime.MinValue;
                     }
@@ -434,36 +434,5 @@ public class Worker : TemplateWorker<Config>
                 }
             }
         }
-    }
-
-    protected override async Task ProcessInoperativeWarning(TimeSpan inoperativeTime, Exception? lastInoperativeException, CancellationToken cancellationToken)
-    {
-        if (_logger?.IsEnabled(LogLevel.Warning) ?? false)
-        {
-            if (!_client.IsConnected)
-            {
-                LoggerMessages.ClientNotConnectedWarn(_logger, inoperativeTime, LastInoperativeException);
-            }
-            if (!_client.IsAuthenticated)
-            {
-                LoggerMessages.ClientNotAuthenticatedWarn(_logger, inoperativeTime, LastInoperativeException);
-            }
-        }
-        await Task.CompletedTask;
-    }
-    protected override async Task ProcessInoperativeError(TimeSpan inoperativeTime, Exception? lastInoperativeException, CancellationToken cancellationToken)
-    {
-        if (_logger?.IsEnabled(LogLevel.Error) ?? false)
-        {
-            if (!_client.IsConnected)
-            {
-                LoggerMessages.ClientNotConnectedErr(_logger, inoperativeTime, LastInoperativeException);
-            }
-            if (!_client.IsAuthenticated)
-            {
-                LoggerMessages.ClientNotAuthenticatedErr(_logger, inoperativeTime, LastInoperativeException);
-            }
-        }
-        await Task.CompletedTask;
     }
 }

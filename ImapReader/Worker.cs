@@ -1,8 +1,11 @@
 using MailKit;
 using MailKit.Search;
 using MimeKit;
+using MimeKit.Encodings;
 using Net.Leksi.MicroService.Common;
 using Net.Leksi.ZkJson;
+using Org.BouncyCastle.Utilities;
+using System.Net.Mail;
 using System.Text.Json;
 
 namespace Net.Leksi.MicroService.ImapReader;
@@ -10,14 +13,12 @@ namespace Net.Leksi.MicroService.ImapReader;
 public class Worker : TemplateWorker<Config>
 {
     private const string s_lastUidPath = "lastuid";
-
+    private const string s_mimeTypeFormat = "{0}/{1}";
     private readonly Client _client = null!;
     private readonly JsonSerializerOptions _mimeJsonSerializerOption = new() { WriteIndented = true, };
     private readonly ICloudClient _storage = null!;
-    private readonly IKafkaProducer _kafkaProducer = null!;
-    private readonly string _pathPrefix;
-    private readonly Random _rnd = new();
-
+    private readonly KafkaProducer _kafkaProducer = null!;
+    
     private uint _lastUid = 0;
     private string _lastUidRoot = null!;
     private IMailFolder _folder = null!;
@@ -31,8 +32,8 @@ public class Worker : TemplateWorker<Config>
         
         _mimeJsonSerializerOption.Converters.Add(new MimeMessageJsonConverter());
         _client = new Client();
-        _storage = _services.GetRequiredService<ICloudClient>();
-        _kafkaProducer = _services.GetRequiredService<IKafkaProducer>();
+        _storage = _services.GetRequiredKeyedService<ICloudClient>("storage");
+        _kafkaProducer = _services.GetRequiredKeyedService<KafkaProducer>("kafka");
     }
     protected override async Task MakeOperative(CancellationToken stoppingToken)
     {
@@ -150,25 +151,68 @@ public class Worker : TemplateWorker<Config>
 
                     MimeMessage message = await _folder.GetMessageAsync(item, stoppingToken);
 
-                    long ticks;
-                    string path;
+                    StoredFolder storedFolder = _services.GetRequiredService<StoredFolder>();
 
-                    do
+                    foreach (var h in message.Headers)
                     {
-                        ticks = DateTime.UtcNow.Ticks;
-                        path = $"/{_storage.Folder}/{ticks}/{string.Join(string.Empty, Enumerable.Range(0, 5).Select(i => (char)_rnd.Next('a', 'z' + 1)).ToArray())}";
+                        storedFolder.Headers.Add(new KeyValuePair<string, string>(h.Field, h.Value));
                     }
-                    while (!(await _storage.FileExists(path, stoppingToken)));
+
+                    MimeIterator iter = new(message);
 
                     MemoryStream ms = new();
-                    await JsonSerializer.SerializeAsync(ms, await _folder.GetMessageAsync(item, stoppingToken), _mimeJsonSerializerOption, stoppingToken);
-                    ms.Flush();
-                    ms.Position = 0;
 
-                    await _storage.UploadFile(ms, path, "application/json", ms.Length, stoppingToken);
+                    while (iter.MoveNext())
+                    {
+                        if (iter.Current is MimePart part)
+                        {
+                            if (part.IsAttachment)
+                            {
+                                StoredFile storedFile = new();
+                                storedFolder.Files.Add(storedFile);
+
+                                foreach (var h in part.Headers)
+                                {
+                                    storedFile.Headers.Add(new KeyValuePair<string, string>(h.Field, h.Value));
+                                }
+
+                                ms.SetLength(0);
+                                part.Content.WriteTo(ms);
+                                ms.Flush();
+                                ms.Position = 0;
+
+                                if(part.ContentTransferEncoding is ContentEncoding.Base64)
+                                {
+                                    byte[] bytes = Convert.FromBase64String(new StreamReader(ms).ReadToEnd());
+                                    ms.SetLength(0);
+                                    ms.Write(bytes);
+                                    ms.Flush();
+                                    ms.Position = 0;
+                                }
+                                else if(part.ContentTransferEncoding is ContentEncoding.QuotedPrintable)
+                                {
+                                    Attachment hack = Attachment.CreateAttachmentFromString(string.Empty, new StreamReader(ms).ReadToEnd());
+                                    ms.SetLength(0);
+                                    new StreamWriter(ms).Write(hack.Name);
+                                    ms.Flush();
+                                    ms.Position = 0;
+                                }
+
+
+                                storedFile.Path = await _storage.UploadFile(
+                                    ms, 
+                                    part.ContentType.Name, 
+                                    string.Format(s_mimeTypeFormat, part.ContentType.MediaType, part.ContentType.MediaSubtype), 
+                                    ms.Length, 
+                                    stoppingToken
+                                );
+                            }
+
+                        }
+                    }
 
                     await _kafkaProducer.ProduceAsync(
-                        new ReceivedFilesKafkaMessage { Path = $"{_storage.Bucket}:{path}", },
+                        new ReceivedFilesKafkaMessage { StoredFolder = storedFolder, },
                         stoppingToken
                     );
 
@@ -184,6 +228,7 @@ public class Worker : TemplateWorker<Config>
 
         await _folder.CloseAsync(false, stoppingToken);
     }
+
     protected override async Task Exiting(CancellationToken stoppingToken)
     {
         _kafkaProducer?.Dispose();

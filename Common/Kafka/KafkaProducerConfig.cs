@@ -1,6 +1,7 @@
 ﻿namespace Net.Leksi.MicroService.Common;
 
-public class KafkaConfig: KafkaConfigBase
+public class KafkaProducerConfig: KafkaConfigBase
 {
+    public string? Sender { get; set; }
     public List<string> Topics { get; private init; } = [];
 }

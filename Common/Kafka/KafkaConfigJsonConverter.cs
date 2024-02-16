@@ -14,9 +14,13 @@ public class KafkaConfigJsonConverter : JsonConverter<KafkaConfigBase>
         {
             result = new KafkaLoggerConfig();
         }
+        else if(typeToConvert == typeof(KafkaProducerConfig))
+        {
+            result = new KafkaProducerConfig();
+        }
         else
         {
-            result = new KafkaConfig();
+            result = new KafkaConsumerConfig();
         }
         if (reader.TokenType is JsonTokenType.StartObject)
         {
@@ -34,7 +38,7 @@ public class KafkaConfigJsonConverter : JsonConverter<KafkaConfigBase>
                 List<string>? targetList = null;
                 if (
                     (
-                        result is KafkaConfig config
+                        result is KafkaProducerConfig config
                         && propertyName.Equals(nameof(config.Topics), StringComparison.OrdinalIgnoreCase) 
                         && (targetList = config.Topics) == targetList
                     )
@@ -88,11 +92,25 @@ public class KafkaConfigJsonConverter : JsonConverter<KafkaConfigBase>
                         throw new JsonException("'*Topic' can only be string or array!");
                     }
                 }
-                else if(propertyName.Equals(nameof(result.Sender), StringComparison.OrdinalIgnoreCase))
+                else if (result is KafkaProducerConfig config1 && propertyName.Equals(nameof(config1.Sender), StringComparison.OrdinalIgnoreCase))
                 {
                     if (reader.GetString() is string value)
                     {
-                        result.Sender = value;
+                        config1.Sender = value;
+                    }
+                }
+                else if (result is KafkaConsumerConfig config2 && propertyName.Equals(nameof(config2.Topic), StringComparison.OrdinalIgnoreCase))
+                {
+                    if (reader.GetString() is string value)
+                    {
+                        config2.Topic = value;
+                    }
+                }
+                else if (result is KafkaConsumerConfig config3 && propertyName.Equals(nameof(config3.Group), StringComparison.OrdinalIgnoreCase))
+                {
+                    if (reader.GetString() is string value)
+                    {
+                        config3.Group = value;
                     }
                 }
                 else
@@ -117,10 +135,15 @@ public class KafkaConfigJsonConverter : JsonConverter<KafkaConfigBase>
             writer.WriteString(it.Key, it.Value);
         }
         writer.WriteEndObject();
-        writer.WriteString(nameof(value.Sender).ToLower(), value.Sender);
-        if (value is KafkaConfig config)
+        if (value is KafkaProducerConfig config)
         {
+            writer.WriteString(nameof(config.Sender).ToLower(), config.Sender);
             WriteList(writer, nameof(config.Topics), config.Topics);
+        }
+        else if (value is KafkaConsumerConfig config1)
+        {
+            writer.WriteString(nameof(config1.Group).ToLower(), config1.Group);
+            writer.WriteString(nameof(config1.Topic).ToLower(), config1.Topic);
         }
         else if (value is KafkaLoggerConfig loggerConfig)
         {

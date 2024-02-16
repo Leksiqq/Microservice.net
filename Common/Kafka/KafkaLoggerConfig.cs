@@ -1,6 +1,6 @@
 ﻿namespace Net.Leksi.MicroService.Common;
 
-public class KafkaLoggerConfig: KafkaConfigBase
+public class KafkaLoggerConfig: KafkaProducerConfig
 {
     public List<string> InformationTopics { get; private init; } = [];
     public List<string> WarningTopics { get; private init; } = [];

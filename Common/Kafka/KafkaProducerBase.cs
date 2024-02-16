@@ -14,10 +14,10 @@ public class KafkaProducerBase: IDisposable
     };
     private readonly IProducer<string, string> _producer = null!;
     private readonly IServiceProvider? _services;
-    protected readonly KafkaConfigBase _config;
+    protected readonly KafkaProducerConfig _config;
     protected readonly WorkerId? _workerId;
     private bool _convertersAdded = false;
-    public KafkaProducerBase(IServiceProvider? services, KafkaConfigBase config)
+    public KafkaProducerBase(IServiceProvider? services, KafkaProducerConfig config)
     {
         _services = services;
         _workerId = _services?.GetRequiredService<WorkerId>();

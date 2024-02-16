@@ -9,10 +9,16 @@ public class WorkerBuilder<TWorker, TConfig>
 where TWorker : TemplateWorker<TConfig> 
 where TConfig : TemplateWorkerConfig, new()
 {
+    private const string s_debugFormat = "{0}: {1}";
     private readonly HostApplicationBuilder _builder;
+    private JsonElement _json;
+    private JsonSerializerOptions _jsonSerializerOptions = new() { PropertyNameCaseInsensitive = true, };
     private WorkerBuilder() 
     {
         _builder = Host.CreateApplicationBuilder();
+        _jsonSerializerOptions.Converters.Add(new KafkaConfigJsonConverterFactory());
+        _builder.Services.AddTransient<StoredFolder>();
+        _builder.Services.AddHostedService<TWorker>();
     }
     public static WorkerBuilder<TWorker, TConfig> Create(IConfiguration bootstrapConfig)
     {
@@ -35,89 +41,107 @@ where TConfig : TemplateWorkerConfig, new()
             Root = $"{bootstrapConfig[Constants.ConfigPropertyName]}/{bootstrapConfig[Constants.NamePropertyName]}",
         };
 
-        JsonElement json = zkJson.IncrementalSerialize(Constants.ScriptPrefix);
+        result._json = zkJson.IncrementalSerialize(Constants.ScriptPrefix);
 
-        JsonSerializerOptions jsonSerializerOptions = new() { PropertyNameCaseInsensitive = true, };
-        jsonSerializerOptions.Converters.Add(new KafkaConfigJsonConverterFactory());
 
         result._builder.Configuration.AddConfiguration(bootstrapConfig);
 
         result._builder.Services.AddSingleton(zooKeeper);
 
-        result._builder.Services.AddSingleton(services =>
-        {
-            TConfig conf = JsonSerializer.Deserialize<TConfig>(json, jsonSerializerOptions)!;
-            services.GetRequiredService<LoggingManager>().Debug(
-                string.Format("{0}: {1}", typeof(TConfig).FullName!, JsonSerializer.Serialize(conf))
-            );
-            return conf;
-        });
+        result.AddConfig();
 
-        result.AddCloudClient(json, jsonSerializerOptions);
-
-        result.AddKafkaProducer(json, jsonSerializerOptions);
-
-        result.AddLogging(json, jsonSerializerOptions);
+        result.AddLogging();
 
         result.AddWorkerId();
 
-        result._builder.Services.AddHostedService<TWorker>();
-
         return result;
+    }
+    public WorkerBuilder<TWorker, TConfig> AddKafkaConsumer(string serviceKey)
+    {
+        if (
+            _json.EnumerateObject().Where(
+                e => e.Name.Equals(serviceKey, StringComparison.OrdinalIgnoreCase)
+            ).Select(e => e.Value).FirstOrDefault() is JsonElement json
+            && json.ValueKind is not JsonValueKind.Undefined
+        )
+        {
+            _builder.Services.AddKeyedSingleton(serviceKey, (services, _) =>
+            {
+                KafkaConsumerConfig conf = JsonSerializer.Deserialize<KafkaConsumerConfig>(json, _jsonSerializerOptions)!;
+                services.GetRequiredService<LoggingManager>().Debug(
+                    string.Format(s_debugFormat, typeof(KafkaProducerConfig).FullName!, JsonSerializer.Serialize(conf))
+                );
+                return new KafkaConsumer(services, conf);
+            });
+        }
+        return this;
+    }
+    public WorkerBuilder<TWorker, TConfig> AddCloudClient(string serviceKey)
+    {
+        if (
+            _json.EnumerateObject().Where(
+                e => e.Name.Equals(serviceKey, StringComparison.OrdinalIgnoreCase)
+            ).Select(e => e.Value).FirstOrDefault() is JsonElement json
+            && json.ValueKind is not JsonValueKind.Undefined
+        )
+        {
+            _builder.Services.AddKeyedSingleton<ICloudClient>(string.Intern(serviceKey), (services, sk) =>
+            {
+                MinioConfig conf = JsonSerializer.Deserialize<MinioConfig>(json, _jsonSerializerOptions)!;
+                services.GetRequiredService<LoggingManager>().Debug(
+                    string.Format(s_debugFormat, typeof(MinioConfig).FullName!, JsonSerializer.Serialize(conf))
+                );
+                return new MinioClientAdapter(conf);
+            });
+        }
+        return this;
+    }
+    public WorkerBuilder<TWorker, TConfig> AddKafkaProducer(string serviceKey)
+    {
+        if (
+            _json.EnumerateObject().Where(
+                e => e.Name.Equals(serviceKey, StringComparison.OrdinalIgnoreCase)
+            ).Select(e => e.Value).FirstOrDefault() is JsonElement json
+            && json.ValueKind is not JsonValueKind.Undefined
+        )
+        {
+            _builder.Services.AddKeyedSingleton(string.Intern(serviceKey), (services, sk) =>
+            {
+                KafkaProducerConfig conf = JsonSerializer.Deserialize<KafkaProducerConfig>(json, _jsonSerializerOptions)!;
+                services.GetRequiredService<LoggingManager>().Debug(
+                    string.Format(s_debugFormat, typeof(KafkaProducerConfig).FullName!, JsonSerializer.Serialize(conf))
+                );
+                return new KafkaProducer(services, conf);
+            });
+        }
+        return this;
     }
     public IHost Build()
     {
         return _builder.Build();
     }
-    private void AddCloudClient(JsonElement config, JsonSerializerOptions jsonSerializerOptions)
+    private void AddConfig()
     {
-        if (
-            config.EnumerateObject().Where(
-                e => e.Name.Equals(Constants.StorageParamName, StringComparison.OrdinalIgnoreCase)
-            ).Select(e => e.Value).FirstOrDefault() is JsonElement json
-            && json.ValueKind is not JsonValueKind.Undefined
-        )
+        _builder.Services.AddSingleton(services =>
         {
-            _builder.Services.AddSingleton<ICloudClient>(services =>
-            {
-                MinioConfig conf = JsonSerializer.Deserialize<MinioConfig>(json, jsonSerializerOptions)!;
-                services.GetRequiredService<LoggingManager>().Debug(
-                    string.Format("{0}: {1}", typeof(MinioConfig).FullName!, JsonSerializer.Serialize(conf))
-                );
-                return new MinioClientAdapter(conf);
-            });
-        }
+            TConfig conf = JsonSerializer.Deserialize<TConfig>(_json, _jsonSerializerOptions)!;
+            services.GetRequiredService<LoggingManager>().Debug(
+                string.Format(s_debugFormat, typeof(TConfig).FullName!, JsonSerializer.Serialize(conf))
+            );
+            return conf;
+        });
     }
-    private void AddKafkaProducer(JsonElement config, JsonSerializerOptions jsonSerializerOptions)
+    private void AddLogging()
     {
         if (
-            config.EnumerateObject().Where(
-                e => e.Name.Equals(Constants.KafkaPropertyName, StringComparison.OrdinalIgnoreCase)
-            ).Select(e => e.Value).FirstOrDefault() is JsonElement json
-            && json.ValueKind is not JsonValueKind.Undefined
-        )
-        {
-            _builder.Services.AddSingleton<IKafkaProducer>(services =>
-            {
-                KafkaConfig conf = JsonSerializer.Deserialize<KafkaConfig>(json, jsonSerializerOptions)!;
-                services.GetRequiredService<LoggingManager>().Debug(
-                    string.Format("{0}: {1}", typeof(KafkaConfig).FullName!, JsonSerializer.Serialize(conf))
-                );
-                return new KafkaProducerAdapter(services, conf);
-            });
-        }
-    }
-    private void AddLogging(JsonElement config, JsonSerializerOptions jsonSerializerOptions)
-    {
-        if (
-            config.EnumerateObject().Where(
+            _json.EnumerateObject().Where(
                 e => e.Name.Equals(Constants.LoggingPropertyName, StringComparison.OrdinalIgnoreCase)
             ).Select(e => e.Value).FirstOrDefault() is JsonElement json
             && json.ValueKind is not JsonValueKind.Undefined
         )
         {
             LoggingManager manager = new();
-            manager.Configure(_builder.Logging, json, jsonSerializerOptions);
+            manager.Configure(_builder.Logging, json, _jsonSerializerOptions);
             _builder.Services.AddSingleton(services =>
             {
                 manager.SetServices(services);

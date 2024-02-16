@@ -1,5 +1,5 @@
 using Net.Leksi.MicroService.Common;
-using Net.Leksi.MicroService.ImapReader;
+using Net.Leksi.MicroService.LogSaver;
 
 
 IConfiguration bootstrapConfig = new ConfigurationBuilder()
@@ -8,7 +8,7 @@ IConfiguration bootstrapConfig = new ConfigurationBuilder()
     .Build();
 
 WorkerBuilder<Worker, Config>.Create(bootstrapConfig)
-    .AddKafkaProducer("kafka")
+    .AddKafkaConsumer("kafka")
     .AddCloudClient("storage")
     .Build()
     .Run();

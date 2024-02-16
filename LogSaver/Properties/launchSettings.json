@@ -1,0 +1,17 @@
+﻿{
+  "$schema": "http://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "LogSaver": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "Development",
+        "zk-connection-string": "vm-kafka:2181",
+        "config": "/leksi/microservices_demo/config",
+        "name": "logSaver",
+        "zk-connection-timeout": "18000",
+        "zk-session-timeout": "18000"
+      },
+      "dotnetRunMessages": true
+    }
+  }
+}
