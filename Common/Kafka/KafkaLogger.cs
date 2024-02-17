@@ -1,5 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 
 namespace Net.Leksi.MicroService.Common;
 
@@ -7,7 +6,8 @@ public class KafkaLogger(
     KafkaLoggerConfig config, 
     string category, 
     Func<string?, string?, LogLevel, bool> filter, 
-    Func<IServiceProvider?> getServices
+    Func<IServiceProvider?> getServices,
+    Func<bool?, bool> operative
 ) : ILogger, IDisposable
 {
     private KafkaProducerBase? _producer;
@@ -37,8 +37,9 @@ public class KafkaLogger(
         Func<TState, Exception?, string> formatter
     )
     {
-        if (IsEnabled(logLevel))
+        if (operative(null) && IsEnabled(logLevel))
         {
+            CancellationTokenSource cancellationTokenSource = new(config.Timeout);
             if(_services is null && getServices() is IServiceProvider services)
             {
                 _services = services;
@@ -46,13 +47,23 @@ public class KafkaLogger(
                 _producer = null;
             }
             _producer ??= new KafkaProducerBase(_services, config);
-            _ = _producer.ProduceAsync(new KafkaLogMessage {
-                EventId = eventId,
-                Exception = exception,
-                LogLevel = logLevel,
-                Message = formatter(state, exception),
-                State = state,
-            }, GetTopics(logLevel)!, CancellationToken.None).Result;
+            try
+            {
+                _ = _producer.ProduceAsync(new KafkaLogMessage
+                {
+                    EventId = eventId,
+                    Exception = exception,
+                    LogLevel = logLevel,
+                    Message = formatter(state, exception),
+                    State = state,
+                }, GetTopics(logLevel)!, cancellationTokenSource.Token).Result;
+            }
+            catch(Exception)
+            {
+
+                operative(false);
+                throw;
+            }
         }
     }
     public void Dispose()

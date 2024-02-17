@@ -1,4 +1,5 @@
-﻿using Net.Leksi.MicroService.Common;
+﻿using Confluent.Kafka;
+using Net.Leksi.MicroService.Common;
 using Net.Leksi.ZkJson;
 using org.apache.zookeeper;
 using System.Reflection;
@@ -33,7 +34,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
 
     protected abstract bool IsOperative { get; }
     protected DateTime LastOperativeTime { get; private set; } = DateTime.MinValue;
-    protected Exception? LastInoperativeException { get; private set; }
+    protected Exception? LastInoperativeException { get; set; }
     protected CancellationToken StoppingTokenCache { get; private set; } = CancellationToken.None;
     protected string? VarRoot {get; private set; }
     protected ZkJsonSerializer VarSerializer { get; private set; } = null!;
@@ -149,7 +150,6 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
                         && pi.GetValue(DefaultConfig) is not null 
                     )
                     {
-                        Console.WriteLine($"set: {pi} = {pi.GetValue(DefaultConfig)}");
                         pi.SetValue(Config, pi.GetValue(DefaultConfig));
                     }
                 }
@@ -196,7 +196,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
             {
                 if (_logger?.IsEnabled(LogLevel.Critical) ?? false)
                 {
-                    Common.LoggerMessages.Exception(_logger, ex.Message, ex.StackTrace!, ex);
+                    Common.LoggerMessages.CriticalException(_logger, ex.Message, ex.StackTrace!, ex);
                 }
                 _running = false;
             }
@@ -209,7 +209,7 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
     {
         if (_logger?.IsEnabled(LogLevel.Critical) ?? false)
         {
-            Common.LoggerMessages.Exception(
+            Common.LoggerMessages.CriticalException(
                 _logger,
                 LastInoperativeException!.Message,
                 lastInoperativeException!.StackTrace!,
@@ -218,8 +218,22 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
         }
         await Task.CompletedTask;
     }
-    protected abstract Task ProcessInoperativeError(TimeSpan inoperativeTime, Exception? lastInoperativeException, CancellationToken stoppingToken);
-    protected abstract Task ProcessInoperativeWarning(TimeSpan inoperativeTime, Exception? lastInoperativeException, CancellationToken stoppingToken);
+    protected virtual async Task ProcessInoperativeError(TimeSpan inoperativeTime, Exception? lastInoperativeException, CancellationToken stoppingToken)
+    {
+        if (_logger?.IsEnabled(LogLevel.Error) ?? false)
+        {
+            Logging.LoggerMessages.InoperativeError(_logger, inoperativeTime, LastInoperativeException);
+        }
+        await Task.CompletedTask;
+    }
+    protected virtual async Task ProcessInoperativeWarning(TimeSpan inoperativeTime, Exception? lastInoperativeException, CancellationToken stoppingToken)
+    {
+        if (_logger?.IsEnabled(LogLevel.Warning) ?? false)
+        {
+            Logging.LoggerMessages.InoperativeWarning(_logger, inoperativeTime, LastInoperativeException);
+        }
+        await Task.CompletedTask;
+    }
     protected abstract Task MakeOperative(CancellationToken stoppingToken);
     protected abstract Task Initialize(CancellationToken stoppingToken);
     protected void UpdateState()
@@ -289,11 +303,12 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
             }
             if (!_isLeader)
             {
+                _isLeader = true;
+                UpdateState();
                 if (_logger?.IsEnabled(LogLevel.Information) ?? false)
                 {
                     Logging.LoggerMessages.BecomeLeader(_logger, _workerId.Id, null);
                 }
-                _isLeader = true;
             }
         }
         return true;

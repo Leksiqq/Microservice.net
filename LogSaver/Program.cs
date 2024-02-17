@@ -10,6 +10,7 @@ IConfiguration bootstrapConfig = new ConfigurationBuilder()
 WorkerBuilder<Worker, Config>.Create(bootstrapConfig)
     .AddKafkaConsumer("kafka")
     .AddCloudClient("storage")
+    .AddMongoCollection("mongodb")
     .Build()
     .Run();
 

@@ -22,7 +22,6 @@ public class KafkaConsumer : IDisposable
         configuration["group.id"] = _config.Group ?? throw new InvalidOperationException($"Group is missed!");
         configuration["auto.offset.reset"] = "earliest";
         configuration["enable.auto.commit"] = "false";
-        Console.WriteLine(string.Join(',', configuration.AsEnumerable()));
         _consumer = new ConsumerBuilder<string, string>(configuration.AsEnumerable()).Build();
         _consumer.Subscribe(_config.Topic ?? throw new InvalidOperationException($"Topic is missed!"));
     }

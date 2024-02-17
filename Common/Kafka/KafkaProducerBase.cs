@@ -1,4 +1,5 @@
 ﻿using Confluent.Kafka;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using System.Text;
 using System.Text.Json;
@@ -16,14 +17,16 @@ public class KafkaProducerBase: IDisposable
     private readonly IServiceProvider? _services;
     protected readonly KafkaProducerConfig _config;
     protected readonly WorkerId? _workerId;
-    private bool _convertersAdded = false;
     public KafkaProducerBase(IServiceProvider? services, KafkaProducerConfig config)
     {
         _services = services;
         _workerId = _services?.GetRequiredService<WorkerId>();
         _config = config;
-        _producer = new ProducerBuilder<string, string>(_config.Properties).Build();
-
+        IConfiguration configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(_config.Properties!)
+            .Build();
+        _producer = new ProducerBuilder<string, string>(configuration.AsEnumerable()).Build();
+        _jsonSerializerOptions.Converters.Add(new KafkaMessageConverterFactory());
     }
     public async Task<List<DeliveryResult<string, string>>> ProduceAsync<TMessage>(TMessage message, List<string> topics, CancellationToken stoppingToken)
         where TMessage : KafkaMessageBase
@@ -36,11 +39,7 @@ public class KafkaProducerBase: IDisposable
         {
             message.WorkerId = _workerId;
         }
-        if (!_convertersAdded)
-        {
-            message.AddConverters(_jsonSerializerOptions.Converters);
-            _convertersAdded = true;
-        }
+        message.Timestamp = DateTime.UtcNow;
         List<DeliveryResult<string, string>> result = [];
         MemoryStream ms = new();
         JsonSerializer.Serialize(ms, message, _jsonSerializerOptions);

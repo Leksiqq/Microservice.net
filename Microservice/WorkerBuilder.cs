@@ -1,4 +1,6 @@
-﻿using Net.Leksi.ZkJson;
+﻿using MongoDB.Bson;
+using MongoDB.Driver;
+using Net.Leksi.ZkJson;
 using org.apache.zookeeper;
 using System.Reflection;
 using System.Text.Json;
@@ -55,6 +57,28 @@ where TConfig : TemplateWorkerConfig, new()
         result.AddWorkerId();
 
         return result;
+    }
+    public WorkerBuilder<TWorker, TConfig> AddMongoCollection(string serviceKey)
+    {
+        if (
+            _json.EnumerateObject().Where(
+                e => e.Name.Equals(serviceKey, StringComparison.OrdinalIgnoreCase)
+            ).Select(e => e.Value).FirstOrDefault() is JsonElement json
+            && json.ValueKind is not JsonValueKind.Undefined
+        )
+        {
+            _builder.Services.AddKeyedSingleton<IMongoCollection<BsonDocument>>(serviceKey, (services, _) =>
+            {
+                MongoClientConfig conf = JsonSerializer.Deserialize<MongoClientConfig>(json, _jsonSerializerOptions)!;
+                services.GetRequiredService<LoggingManager>().Debug(
+                    string.Format(s_debugFormat, typeof(MongoClientConfig).FullName!, JsonSerializer.Serialize(conf))
+                );
+
+                MongoClient  client = new (conf.ConnectionString);
+                return client.GetDatabase(conf.Database).GetCollection<BsonDocument>(conf.Collection);
+            });
+        }
+        return this;
     }
     public WorkerBuilder<TWorker, TConfig> AddKafkaConsumer(string serviceKey)
     {
