@@ -54,6 +54,7 @@ public class Worker : TemplateWorker<Config>
     {
         Console.WriteLine(args.ConsumeResult.Message.Value);
         KafkaLogMessage message = JsonSerializer.Deserialize<KafkaLogMessage>(args.ConsumeResult.Message.Value, _messageJsonOptions)!;
+        Console.WriteLine("    " + JsonSerializer.Serialize(message));
         //_mongoCollection.InsertOne(message.ToBsonDocument());
     }
 

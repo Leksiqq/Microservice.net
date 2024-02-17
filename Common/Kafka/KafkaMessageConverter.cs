@@ -103,16 +103,17 @@ public class KafkaMessageConverter : JsonConverter<KafkaMessageBase>
 
     public override void Write(Utf8JsonWriter writer, KafkaMessageBase value, JsonSerializerOptions options)
     {
+        bool writeNull = options.DefaultIgnoreCondition is not JsonIgnoreCondition.WhenWritingDefault
+           && options.DefaultIgnoreCondition is not JsonIgnoreCondition.WhenWritingNull
+           && options.DefaultIgnoreCondition is not JsonIgnoreCondition.Always;
+
         writer.WriteStartObject();
 
         if (value.Key is { })
         {
             writer.WriteString(nameof(value.Key).ToLower(), value.Key);
         }
-        else if (
-            options.DefaultIgnoreCondition is not JsonIgnoreCondition.WhenWritingNull
-            && options.DefaultIgnoreCondition is not JsonIgnoreCondition.Always
-        )
+        else if (writeNull)
         {
             writer.WriteNull(nameof(value.Key).ToLower());
         }
@@ -121,10 +122,7 @@ public class KafkaMessageConverter : JsonConverter<KafkaMessageBase>
         {
             writer.WriteString(nameof(value.Sender).ToLower(), value.Sender);
         }
-        else if (
-            options.DefaultIgnoreCondition is not JsonIgnoreCondition.WhenWritingNull
-            && options.DefaultIgnoreCondition is not JsonIgnoreCondition.Always
-        )
+        else if (writeNull)
         {
             writer.WriteNull(nameof(value.Sender).ToLower());
         }
@@ -133,10 +131,7 @@ public class KafkaMessageConverter : JsonConverter<KafkaMessageBase>
         {
             writer.WriteString(nameof(value.Timestamp).ToLower(), $"{value.Timestamp:o}");
         }
-        else if (
-            options.DefaultIgnoreCondition is not JsonIgnoreCondition.WhenWritingNull
-            && options.DefaultIgnoreCondition is not JsonIgnoreCondition.Always
-        )
+        else if (writeNull)
         {
             writer.WriteNull(nameof(value.Timestamp).ToLower());
         }
@@ -146,10 +141,7 @@ public class KafkaMessageConverter : JsonConverter<KafkaMessageBase>
             writer.WritePropertyName(nameof(value.WorkerId).ToLower());
             JsonSerializer.Serialize(writer, value.WorkerId, options);
         }
-        else if (
-            options.DefaultIgnoreCondition is not JsonIgnoreCondition.WhenWritingNull
-            && options.DefaultIgnoreCondition is not JsonIgnoreCondition.Always
-        )
+        else if (writeNull)
         {
             writer.WriteNull(nameof(value.WorkerId).ToLower());
         }
@@ -163,10 +155,7 @@ public class KafkaMessageConverter : JsonConverter<KafkaMessageBase>
                 writer.WritePropertyName(nameof(logMessage.EventId).ToLower());
                 JsonSerializer.Serialize(writer, logMessage.EventId, options);
             }
-            else if (
-                options.DefaultIgnoreCondition is not JsonIgnoreCondition.WhenWritingNull
-                && options.DefaultIgnoreCondition is not JsonIgnoreCondition.Always
-            )
+            else if (writeNull)
             {
                 writer.WriteNull(nameof(logMessage.EventId).ToLower());
             }
@@ -176,10 +165,7 @@ public class KafkaMessageConverter : JsonConverter<KafkaMessageBase>
                 writer.WritePropertyName(nameof(logMessage.State).ToLower());
                 JsonSerializer.Serialize(writer, logMessage.State, options);
             }
-            else if (
-                options.DefaultIgnoreCondition is not JsonIgnoreCondition.WhenWritingNull
-                && options.DefaultIgnoreCondition is not JsonIgnoreCondition.Always
-            )
+            else if (writeNull)
             {
                 writer.WriteNull(nameof(logMessage.State).ToLower());
             }
@@ -188,10 +174,7 @@ public class KafkaMessageConverter : JsonConverter<KafkaMessageBase>
             {
                 writer.WriteString(nameof(logMessage.Message).ToLower(), logMessage.Message);
             }
-            else if (
-                options.DefaultIgnoreCondition is not JsonIgnoreCondition.WhenWritingNull
-                && options.DefaultIgnoreCondition is not JsonIgnoreCondition.Always
-            )
+            else if (writeNull)
             {
                 writer.WriteNull(nameof(logMessage.Message).ToLower());
             }
@@ -201,10 +184,7 @@ public class KafkaMessageConverter : JsonConverter<KafkaMessageBase>
                 writer.WritePropertyName(nameof(logMessage.Exception).ToLower());
                 JsonSerializer.Serialize(writer, logMessage.Exception, options);
             }
-            else if (
-                options.DefaultIgnoreCondition is not JsonIgnoreCondition.WhenWritingNull
-                && options.DefaultIgnoreCondition is not JsonIgnoreCondition.Always
-            )
+            else if (writeNull)
             {
                 writer.WriteNull(nameof(logMessage.Exception).ToLower());
             }

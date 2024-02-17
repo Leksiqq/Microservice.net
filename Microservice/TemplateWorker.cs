@@ -156,7 +156,13 @@ public abstract class TemplateWorker<TConfig> : BackgroundService where TConfig 
 
                 if (string.IsNullOrEmpty(Config.VarPath))
                 {
-                    throw new ArgumentException(string.Format(Constants.MissedMandatoryProperty, nameof(Config), nameof(Config.VarPath)));
+                    throw new ArgumentException(
+                        string.Format(
+                            Constants.MissedMandatoryProperty, 
+                            nameof(Config), 
+                            nameof(Config.VarPath)
+                        )
+                    );
                 }
 
                 VarRoot = $"{Config.VarPath}/{_workerId.Name}";
