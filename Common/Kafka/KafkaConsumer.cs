@@ -23,25 +23,41 @@ public class KafkaConsumer : IDisposable
         configuration["auto.offset.reset"] = "earliest";
         configuration["enable.auto.commit"] = "false";
         _consumer = new ConsumerBuilder<string, string>(configuration.AsEnumerable()).Build();
-        _consumer.Subscribe(_config.Topic ?? throw new InvalidOperationException($"Topic is missed!"));
     }
     public void Listen(int timeout, CancellationToken stoppingToken)
     {
+        using CancellationTokenSource timeoutCts = new(timeout == Timeout.Infinite ? _config.Timeout : timeout);
+        using CancellationTokenSource linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+            stoppingToken, 
+            timeoutCts?.Token ?? CancellationToken.None
+        );
         DateTime started = DateTime.Now;
-        while (!stoppingToken.IsCancellationRequested)
+        while (!linkedCts.IsCancellationRequested)
         {
-            ConsumeResult<string, string> cr = (
-                timeout == Timeout.Infinite 
-                ? _consumer.Consume(stoppingToken) 
-                : _consumer.Consume(timeout)
-            );
-            if (!stoppingToken.IsCancellationRequested && cr is { })
+            try
             {
-                Consume?.Invoke(new KafkaConsumeEventArgs { ConsumeResult = cr });
+                _consumer.Subscribe(_config.Topic ?? throw new InvalidOperationException($"Topic is missed!"));
+                ConsumeResult<string, string> cr = (_consumer.Consume(linkedCts.Token));
+                if (!linkedCts.IsCancellationRequested && cr is { })
+                {
+                    Consume?.Invoke(new KafkaConsumeEventArgs { ConsumeResult = cr });
+                }
+                _consumer.Commit(cr);
+                if (timeout != Timeout.Infinite && (DateTime.Now - started).TotalMilliseconds > timeout)
+                {
+                    break;
+                }
             }
-            if (timeout != Timeout.Infinite && (DateTime.Now - started).TotalMilliseconds > timeout)
+            catch (Exception ex)
             {
-                break;
+                if (!linkedCts.Token.IsCancellationRequested)
+                {
+                    throw;
+                }
+            }
+            finally
+            {
+                _consumer.Unsubscribe();
             }
         }
     }

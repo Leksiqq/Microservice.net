@@ -46,7 +46,11 @@ public class KafkaLogger(
                 _producer?.Dispose();
                 _producer = null;
             }
-            _producer ??= new KafkaProducerBase(_services, config);
+            if(_producer is null)
+            {
+                _producer = new KafkaProducerBase(_services, config);
+                _producer.AddConverter(new ExceptionConverterFactory());
+            }
             try
             {
                 _ = _producer.ProduceAsync(new KafkaLogMessage
@@ -60,7 +64,6 @@ public class KafkaLogger(
             }
             catch(Exception)
             {
-
                 operative(false);
                 throw;
             }

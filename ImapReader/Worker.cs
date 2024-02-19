@@ -143,6 +143,11 @@ public class Worker : TemplateWorker<Config>
                 {
                     _lastUid = item.Id;
 
+                    if(_lastUid == 7000)
+                    {
+                        throw new Exception("message", new InvalidOperationException("message1"));
+                    }
+
                     if (_logger?.IsEnabled(LogLevel.Information) ?? false)
                     {
                         LoggerMessages.MessageReceived(_logger, item.Id, null);

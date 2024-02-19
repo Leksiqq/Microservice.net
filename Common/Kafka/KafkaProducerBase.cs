@@ -28,6 +28,10 @@ public class KafkaProducerBase: IDisposable
         _producer = new ProducerBuilder<string, string>(configuration.AsEnumerable()).Build();
         _jsonSerializerOptions.Converters.Add(new KafkaMessageConverterFactory());
     }
+    public void AddConverter(JsonConverter converter)
+    {
+        _jsonSerializerOptions.Converters.Add(converter);
+    }
     public async Task<List<DeliveryResult<string, string>>> ProduceAsync<TMessage>(TMessage message, List<string> topics, CancellationToken stoppingToken)
         where TMessage : KafkaMessageBase
     {
@@ -55,10 +59,14 @@ public class KafkaProducerBase: IDisposable
         }
         kafkaMessage.Headers.Add(Constants.KafkaMessageTypeName, Encoding.UTF8.GetBytes(typeof(TMessage).FullName!));
 
+        using CancellationTokenSource timeoutCts = new(_config.Timeout);
+        using CancellationTokenSource linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, timeoutCts.Token);
+
         foreach (string topic in topics)
         {
-            result.Add(await _producer.ProduceAsync(topic, kafkaMessage, stoppingToken));
+            result.Add(await _producer.ProduceAsync(topic, kafkaMessage, linkedCts.Token));
         }
+
         return result;
     }
     public void Dispose()

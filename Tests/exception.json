@@ -1,0 +1,46 @@
+{
+  "timestamp": "2024-02-19T07:19:54.5285392Z",
+  "workerid": {
+    "Id": "e83d8b69-c746-4345-9b5f-476f2f85c10b",
+    "Name": "imapreaders:finance@translog.org"
+  },
+  "loglevel": 5,
+  "eventid": {
+    "Id": 100002,
+    "Name": "CriticalException"
+  },
+  "state": [
+    {
+      "Key": "Message",
+      "Value": "message"
+    },
+    {
+      "Key": "StackTrace",
+      "Value": "   at Net.Leksi.MicroService.ImapReader.Worker.Operate(CancellationToken stoppingToken) in W:\\C#\\Microservice\\ImapReader\\Worker.cs:line 148\r\n   at Net.Leksi.MicroService.TemplateWorker\u00601.ExecuteAsync(CancellationToken stoppingToken) in W:\\C#\\Microservice\\Microservice\\TemplateWorker.cs:line 111"
+    },
+    {
+      "Key": "{OriginalFormat}",
+      "Value": "{Message} {StackTrace}"
+    }
+  ],
+  "message": "message    at Net.Leksi.MicroService.ImapReader.Worker.Operate(CancellationToken stoppingToken) in W:\\C#\\Microservice\\ImapReader\\Worker.cs:line 148\r\n   at Net.Leksi.MicroService.TemplateWorker\u00601.ExecuteAsync(CancellationToken stoppingToken) in W:\\C#\\Microservice\\Microservice\\TemplateWorker.cs:line 111",
+  "exception": {
+    "TargetSite": "\u003Cn/a\u003E",
+    "Message": "message",
+    "Data": {},
+    "InnerException": {
+      "TargetSite": null,
+      "Message": "message1",
+      "Data": {},
+      "InnerException": null,
+      "HelpLink": null,
+      "Source": null,
+      "HResult": -2146233079,
+      "StackTrace": null
+    },
+    "HelpLink": null,
+    "Source": "ImapReader",
+    "HResult": -2146233088,
+    "StackTrace": "   at Net.Leksi.MicroService.ImapReader.Worker.Operate(CancellationToken stoppingToken) in W:\\C#\\Microservice\\ImapReader\\Worker.cs:line 148\r\n   at Net.Leksi.MicroService.TemplateWorker\u00601.ExecuteAsync(CancellationToken stoppingToken) in W:\\C#\\Microservice\\Microservice\\TemplateWorker.cs:line 111"
+  }
+}
